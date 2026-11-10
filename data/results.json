@@ -12,6 +12,14 @@
         "заставка": 6.0,
         "3d-сцена": 10.0
       },
+      "works": {
+        "заставка": {
+          "url": "works/openai/gpt-6-astra/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/openai/gpt-6-astra/city.html"
+        }
+      },
       "quality": 8.5,
       "efficiency": 6.509794144587753,
       "total": 79.02938243376325,
@@ -33,6 +41,14 @@
         "портрет": 9.0,
         "заставка": 6.0,
         "3d-сцена": 4.0
+      },
+      "works": {
+        "заставка": {
+          "url": "works/openai/gpt-6.1-terra/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/openai/gpt-6.1-terra/city.html"
+        }
       },
       "quality": 7.25,
       "efficiency": 9.310979857266144,
@@ -59,6 +75,14 @@
         "заставка": 7.0,
         "3d-сцена": 5.0
       },
+      "works": {
+        "заставка": {
+          "url": "works/google/gemini-4-carbon/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/google/gemini-4-carbon/city.html"
+        }
+      },
       "quality": 7.25,
       "efficiency": 8.661158746499598,
       "total": 76.73347623949878,
@@ -80,6 +104,14 @@
         "портрет": 10.0,
         "заставка": 9.0,
         "3d-сцена": 9.0
+      },
+      "works": {
+        "заставка": {
+          "url": "works/anthropic/claude-fable-5.2/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/anthropic/claude-fable-5.2/city.html"
+        }
       },
       "quality": 9.5,
       "efficiency": 3.3824826312161402,
@@ -103,6 +135,14 @@
         "заставка": 10.0,
         "3d-сцена": 7.0
       },
+      "works": {
+        "заставка": {
+          "url": "works/anthropic/claude-opus-5.5/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/anthropic/claude-opus-5.5/city.html"
+        }
+      },
       "quality": 8.25,
       "efficiency": 5.0,
       "total": 72.75,
@@ -124,6 +164,16 @@
         "портрет": 5.0,
         "заставка": 10.0,
         "3d-сцена": 2.0
+      },
+      "works": {
+        "заставка": {
+          "url": "works/anthropic/claude-sonnet-5.5/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/anthropic/claude-sonnet-5.5/city.html",
+          "note": "В оригинале Sonnet шейдер асфальта выдаёт ошибку. В копии для просмотра исправлены координаты дорожной разметки.",
+          "fixed_url": "works/anthropic/claude-sonnet-5.5/city-fixed.html"
+        }
       },
       "quality": 6.75,
       "efficiency": 5.474951771888938,
@@ -149,6 +199,16 @@
         "портрет": 6.0,
         "заставка": 7.0,
         "3d-сцена": 1.0
+      },
+      "works": {
+        "заставка": {
+          "url": "works/moonshotai/kimi-k3.1-pro/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/moonshotai/kimi-k3.1-pro/city.html",
+          "note": "В оригинале Kimi сцена не запускается. В копии для просмотра исправлены опечатка в числе и параметры тумана.",
+          "fixed_url": "works/moonshotai/kimi-k3.1-pro/city-fixed.html"
+        }
       },
       "quality": 6.0,
       "efficiency": 5.581267932711515,

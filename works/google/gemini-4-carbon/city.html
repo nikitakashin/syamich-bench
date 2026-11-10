@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyberpunk Night City</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #03010a;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: radial-gradient(circle, rgba(0,0,0,0) 55%, rgba(2,0,8,0.85) 100%);
+            box-shadow: inset 0 0 120px rgba(0, 240, 255, 0.05);
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="vignette"></div>
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- SCENE & RENDERER SETUP ---
+        const scene = new THREE.Scene();
+        const fogColor = new THREE.Color(0x060314);
+        scene.background = fogColor;
+        scene.fog = new THREE.FogExp2(fogColor, 0.0085);
+
+        const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.5, 450);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.25;
+        document.body.appendChild(renderer.domElement);
+
+        // Reflection Group (Mirrored World for Wet Asphalt)
+        const worldGroup = new THREE.Group();
+        scene.add(worldGroup);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x140d2b, 2.2);
+        scene.add(ambientLight);
+
+        const dirLight1 = new THREE.DirectionalLight(0x00e5ff, 1.8);
+        dirLight1.position.set(80, 120, 60);
+        scene.add(dirLight1);
+
+        const dirLight2 = new THREE.DirectionalLight(0xff0066, 1.8);
+        dirLight2.position.set(-80, 100, -60);
+        scene.add(dirLight2);
+
+        // --- PROCEDURAL TEXTURES ---
+        // 1. Building Windows & Facades
+        function createBuildingTextures(hueType) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            const emitCanvas = document.createElement('canvas');
+            emitCanvas.width = 256;
+            emitCanvas.height = 512;
+            const emitCtx = emitCanvas.getContext('2d');
+
+            // Base wall
+            ctx.fillStyle = '#0a0b12';
+            ctx.fillRect(0, 0, 256, 512);
+            emitCtx.fillStyle = '#000000';
+            emitCtx.fillRect(0, 0, 256, 512);
+
+            // Architectural grooves
+            ctx.fillStyle = '#050508';
+            for (let x = 0; x < 256; x += 32) {
+                ctx.fillRect(x, 0, 4, 512);
+            }
+
+            const palettes = [
+                ['#00f3ff', '#0088ff', '#e0ffff', '#ffaa00'],
+                ['#ff007f', '#aa00ff', '#ffe0f0', '#00f3ff'],
+                ['#ffae00', '#ff3300', '#fff0d0', '#00ffaa']
+            ];
+            const palette = palettes[hueType % palettes.length];
+
+            const cols = 16;
+            const rows = 64;
+            const w = 256 / cols;
+            const h = 512 / rows;
+
+            for (let r = 1; r < rows - 1; r++) {
+                // Random floor dark bands (mechanical floors)
+                if (r % 14 === 0) continue;
+                const floorLitChance = Math.random() * 0.65;
+
+                for (let c = 0; c < cols; c++) {
+                    if (c % 4 === 0) continue; // Vertical pillars
+                    if (Math.random() < floorLitChance) {
+                        const color = palette[Math.floor(Math.random() * palette.length)];
+                        const intensity = 0.4 + Math.random() * 0.6;
+                        
+                        emitCtx.fillStyle = color;
+                        emitCtx.globalAlpha = intensity;
+                        emitCtx.fillRect(c * w + 2, r * h + 2, w - 4, h - 3);
+
+                        ctx.fillStyle = '#1c2230';
+                        ctx.fillRect(c * w + 2, r * h + 2, w - 4, h - 3);
+                    } else {
+                        ctx.fillStyle = '#0d101a';
+                        ctx.fillRect(c * w + 2, r * h + 2, w - 4, h - 3);
+                    }
+                }
+            }
+            emitCtx.globalAlpha = 1.0;
+
+            const map = new THREE.CanvasTexture(canvas);
+            map.wrapS = THREE.RepeatWrapping;
+            map.wrapT = THREE.RepeatWrapping;
+
+            const emissiveMap = new THREE.CanvasTexture(emitCanvas);
+            emissiveMap.wrapS = THREE.RepeatWrapping;
+            emissiveMap.wrapT = THREE.RepeatWrapping;
+
+            return { map, emissiveMap };
+        }
+
+        // 2. Wet Asphalt Normal/Roughness Map
+        function createAsphaltTextures() {
+            const size = 512;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#8080ff'; // Flat normal
+            ctx.fillRect(0, 0, size, size);
+
+            // Subtle noisy ripples for wet surface distortion
+            const imgData = ctx.getImageData(0, 0, size, size);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const n1 = (Math.random() - 0.5) * 26;
+                const n2 = (Math.random() - 0.5) * 26;
+                data[i] = Math.min(255, Math.max(0, 128 + n1));     // R (X)
+                data[i + 1] = Math.min(255, Math.max(0, 128 + n2)); // G (Y)
+                data[i + 2] = 255;                                  // B (Z)
+                data[i + 3] = 255;
+            }
+            ctx.putImageData(imgData, 0, 0);
+
+            // Puddle patches (smooth normal areas)
+            const roughCanvas = document.createElement('canvas');
+            roughCanvas.width = size;
+            roughCanvas.height = size;
+            const rCtx = roughCanvas.getContext('2d');
+            rCtx.fillStyle = '#606060';
+            rCtx.fillRect(0, 0, size, size);
+
+            for (let i = 0; i < 45; i++) {
+                const x = Math.random() * size;
+                const y = Math.random() * size;
+                const rad = 20 + Math.random() * 80;
+                const grad = rCtx.createRadialGradient(x, y, 2, x, y, rad);
+                const val = Math.random() > 0.5 ? 'rgba(15,15,15,0.7)' : 'rgba(150,150,150,0.5)';
+                grad.addColorStop(0, val);
+                grad.addColorStop(1, 'rgba(90,90,90,0)');
+                rCtx.fillStyle = grad;
+                rCtx.beginPath();
+                rCtx.arc(x, y, rad, 0, Math.PI * 2);
+                rCtx.fill();
+            }
+
+            const normalMap = new THREE.CanvasTexture(canvas);
+            normalMap.wrapS = THREE.RepeatWrapping;
+            normalMap.wrapT = THREE.RepeatWrapping;
+            normalMap.repeat.set(35, 35);
+
+            const roughnessMap = new THREE.CanvasTexture(roughCanvas);
+            roughnessMap.wrapS = THREE.RepeatWrapping;
+            roughnessMap.wrapT = THREE.RepeatWrapping;
+            roughnessMap.repeat.set(16, 16);
+
+            return { normalMap, roughnessMap };
+        }
+
+        // 3. Cyberpunk Neon Signs
+        const glyphs = ['サイバー', '未来都市', 'ネオン', '電脳', '2099', 'NEXUS', 'SYNTH', '光速', 'VOID', 'AI-9', '零式', 'OMEGA'];
+        function createNeonSignTexture(text, colorHex, styleType) {
+            const canvas = document.createElement('canvas');
+            const isVertical = styleType === 0;
+            canvas.width = isVertical ? 128 : 512;
+            canvas.height = isVertical ? 512 : 128;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = 'rgba(5, 5, 12, 0.85)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Neon Border
+            ctx.strokeStyle = colorHex;
+            ctx.lineWidth = 6;
+            ctx.shadowColor = colorHex;
+            ctx.shadowBlur = 18;
+            ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+
+            // Inner accent line
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#ffffff';
+            ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+
+            // Text
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = colorHex;
+            ctx.shadowBlur = 24;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            if (isVertical) {
+                ctx.font = 'bold 54px sans-serif';
+                const chars = text.split('');
+                const step = (canvas.height - 80) / Math.max(chars.length, 1);
+                chars.forEach((ch, idx) => {
+                    ctx.fillText(ch, canvas.width / 2, 55 + idx * step);
+                    ctx.fillText(ch, canvas.width / 2, 55 + idx * step);
+                });
+            } else {
+                ctx.font = 'bold 64px sans-serif';
+                ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+                ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+            }
+
+            // Scanlines
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+            for (let y = 0; y < canvas.height; y += 4) {
+                ctx.fillRect(0, y, canvas.width, 2);
+            }
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // 4. Soft Glow Sprite Texture
+        function createGlowTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            grad.addColorStop(0.25, 'rgba(255, 255, 255, 0.6)');
+            grad.addColorStop(0.6, 'rgba(255, 255, 255, 0.12)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 128, 128);
+            return new THREE.CanvasTexture(canvas);
+        }
+        const glowTexture = createGlowTexture();
+
+        // --- CITY GENERATION ---
+        const CAMERA_RADIUS = 72;
+        const buildingMaterials = [];
+        for (let i = 0; i < 6; i++) {
+            const { map, emissiveMap } = createBuildingTextures(i);
+            buildingMaterials.push(new THREE.MeshStandardMaterial({
+                map: map,
+                emissiveMap: emissiveMap,
+                emissive: new THREE.Color(0xffffff),
+                emissiveIntensity: 1.5,
+                roughness: 0.3,
+                metalness: 0.7
+            }));
+        }
+
+        const darkTechMat = new THREE.MeshStandardMaterial({
+            color: 0x090a10,
+            roughness: 0.4,
+            metalness: 0.8
+        });
+
+        const neonColors = ['#00f3ff', '#ff007f', '#ffae00', '#b700ff', '#00ff88', '#ff2a2a'];
+        const signMaterials = [];
+        for (let i = 0; i < 18; i++) {
+            const text = glyphs[i % glyphs.length];
+            const col = neonColors[i % neonColors.length];
+            const isVert = i % 2;
+            const tex = createNeonSignTexture(text, col, isVert);
+            signMaterials.push({
+                isVert: isVert === 0,
+                color: col,
+                mat: new THREE.MeshBasicMaterial({
+                    map: tex,
+                    side: THREE.DoubleSide,
+                    transparent: true
+                })
+            });
+        }
+
+        const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+        const cylGeo = new THREE.CylinderGeometry(0.08, 0.15, 1, 6);
+        const planeGeo = new THREE.PlaneGeometry(1, 1);
+
+        const buildingsData = [];
+
+        // Populate City Grid avoiding the circular camera flight corridor
+        const gridRange = 210;
+        const step = 16;
+
+        for (let x = -gridRange; x <= gridRange; x += step) {
+            for (let z = -gridRange; z <= gridRange; z += step) {
+                const jitterX = x + (Math.random() - 0.5) * 5;
+                const jitterZ = z + (Math.random() - 0.5) * 5;
+                const distFromCenter = Math.hypot(jitterX, jitterZ);
+
+                // Keep circular flight canyon clear (radius 60..84)
+                if (Math.abs(distFromCenter - CAMERA_RADIUS) < 12.5) continue;
+                if (distFromCenter > 215) continue;
+
+                // Central megatowers, mid-ring skyscrapers, outer dense blocks
+                let heightFactor = 1;
+                if (distFromCenter < 45) heightFactor = 1.9;
+                else if (Math.abs(distFromCenter - CAMERA_RADIUS) < 28) heightFactor = 1.45;
+
+                const w = 7 + Math.random() * 6.5;
+                const d = 7 + Math.random() * 6.5;
+                const h = (22 + Math.pow(Math.random(), 1.4) * 85) * heightFactor;
+
+                const matIdx = Math.floor(Math.random() * buildingMaterials.length);
+                // Clone material only to vary UV repeat cleanly per building group? Better: scale UVs via geometry or use shared materials
+                const mat = buildingMaterials[matIdx];
+
+                const bGroup = new THREE.Group();
+                bGroup.position.set(jitterX, 0, jitterZ);
+
+                // Main tower body
+                const mainMesh = new THREE.Mesh(boxGeo, mat);
+                mainMesh.scale.set(w, h, d);
+                mainMesh.position.y = h / 2;
+                bGroup.add(mainMesh);
+
+                // Tiered upper section on tall skyscrapers
+                if (h > 55 && Math.random() > 0.3) {
+                    const tierH = 12 + Math.random() * 25;
+                    const tierMesh = new THREE.Mesh(boxGeo, mat);
+                    tierMesh.scale.set(w * 0.68, tierH, d * 0.68);
+                    tierMesh.position.y = h + tierH / 2;
+                    bGroup.add(tierMesh);
+
+                    // Spire / Antenna
+                    if (Math.random() > 0.35) {
+                        const spireH = 10 + Math.random() * 22;
+                        const spire = new THREE.Mesh(cylGeo, darkTechMat);
+                        spire.scale.set(1, spireH, 1);
+                        spire.position.y = h + tierH + spireH / 2;
+                        bGroup.add(spire);
+
+                        // Red/Cyan warning beacon
+                        const beaconSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                            map: glowTexture,
+                            color: Math.random() > 0.5 ? 0xff0055 : 0x00f3ff,
+                            blending: THREE.AdditiveBlending,
+                            depthWrite: false
+                        }));
+                        beaconSprite.scale.set(3.5, 3.5, 1);
+                        beaconSprite.position.y = h + tierH + spireH;
+                        bGroup.add(beaconSprite);
+                    }
+                }
+
+                // Glowing roof trim on some buildings
+                if (Math.random() > 0.6) {
+                    const trimColor = neonColors[Math.floor(Math.random() * neonColors.length)];
+                    const trimMat = new THREE.MeshBasicMaterial({ color: trimColor });
+                    const trim = new THREE.Mesh(boxGeo, trimMat);
+                    trim.scale.set(w + 0.3, 0.35, d + 0.3);
+                    trim.position.y = h - 0.5;
+                    bGroup.add(trim);
+                }
+
+                // Attach Neon Signs mostly facing the flight path or streets
+                const nearCorridor = Math.abs(distFromCenter - CAMERA_RADIUS) < 35;
+                const signCount = nearCorridor ? (1 + Math.floor(Math.random() * 3)) : (Math.random() > 0.55 ? 1 : 0);
+
+                for (let s = 0; s < signCount; s++) {
+                    const sInfo = signMaterials[Math.floor(Math.random() * signMaterials.length)];
+                    const signY = 6 + Math.random() * Math.min(h - 10, 48);
+                    if (signY < 5) continue;
+
+                    const signMesh = new THREE.Mesh(planeGeo, sInfo.mat);
+                    const sw = sInfo.isVert ? (2.0 + Math.random() * 1.4) : (6.0 + Math.random() * 5.0);
+                    const sh = sInfo.isVert ? (9.0 + Math.random() * 8.0) : (2.2 + Math.random() * 1.6);
+                    signMesh.scale.set(sw, sh, 1);
+
+                    const side = Math.floor(Math.random() * 4);
+                    const offset = 0.45;
+                    if (side === 0) {
+                        signMesh.position.set(0, signY, d / 2 + offset);
+                    } else if (side === 1) {
+                        signMesh.position.set(0, signY, -d / 2 - offset);
+                        signMesh.rotation.y = Math.PI;
+                    } else if (side === 2) {
+                        signMesh.position.set(w / 2 + offset, signY, 0);
+                        signMesh.rotation.y = Math.PI / 2;
+                    } else {
+                        signMesh.position.set(-w / 2 - offset, signY, 0);
+                        signMesh.rotation.y = -Math.PI / 2;
+                    }
+                    bGroup.add(signMesh);
+
+                    // Additive Halo Sprite around bright signs near camera
+                    if (nearCorridor && Math.random() > 0.3) {
+                        const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+                            map: glowTexture,
+                            color: sInfo.color,
+                            blending: THREE.AdditiveBlending,
+                            transparent: true,
+                            opacity: 0.45,
+                            depthWrite: false
+                        }));
+                        halo.scale.set(Math.max(sw, sh) * 2.1, Math.max(sw, sh) * 2.1, 1);
+                        halo.position.copy(signMesh.position);
+                        bGroup.add(halo);
+                    }
+                }
+
+                worldGroup.add(bGroup);
+                buildingsData.push({ x: jitterX, z: jitterZ, w, d, h });
+            }
+        }
+
+        // Street-level Neon Lamps & Light Pools along the circular boulevard
+        const streetRingCount = 64;
+        for (let i = 0; i < streetRingCount; i++) {
+            const angle = (i / streetRingCount) * Math.PI * 2;
+            for (let side of [-1, 1]) {
+                const r = CAMERA_RADIUS + side * 8.5;
+                const lx = Math.cos(angle) * r;
+                const lz = Math.sin(angle) * r;
+
+                const pole = new THREE.Mesh(cylGeo, darkTechMat);
+                pole.scale.set(0.8, 5.5, 0.8);
+                pole.position.set(lx, 2.75, lz);
+                worldGroup.add(pole);
+
+                const col = i % 3 === 0 ? 0xff007f : 0x00f3ff;
+                const bulb = new THREE.Sprite(new THREE.SpriteMaterial({
+                    map: glowTexture,
+                    color: col,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                }));
+                bulb.scale.set(4.5, 4.5, 1);
+                bulb.position.set(lx, 5.6, lz);
+                worldGroup.add(bulb);
+            }
+        }
+
+        // Giant Holographic Core Ring in the City Center
+        const holoGroup = new THREE.Group();
+        holoGroup.position.set(0, 95, 0);
+        const torusGeo = new THREE.TorusGeometry(24, 0.45, 12, 96);
+        const torusMat1 = new THREE.MeshBasicMaterial({ color: 0x00f3ff });
+        const torusMat2 = new THREE.MeshBasicMaterial({ color: 0xff007f });
+        const ring1 = new THREE.Mesh(torusGeo, torusMat1);
+        ring1.rotation.x = Math.PI / 2;
+        const ring2 = new THREE.Mesh(new THREE.TorusGeometry(28, 0.25, 8, 96), torusMat2);
+        ring2.rotation.x = Math.PI / 2.2;
+        holoGroup.add(ring1, ring2);
+        worldGroup.add(holoGroup);
+
+        // --- FLYING CARS & LIGHT TRAILS ---
+        const flyingCars = [];
+        const CAR_COUNT = 55;
+        const carBodyGeo = new THREE.BoxGeometry(1.1, 0.4, 2.4);
+
+        // Gradient trail texture (fades out cleanly to tail)
+        function createTrailTexture() {
+            const c = document.createElement('canvas');
+            c.width = 256;
+            c.height = 32;
+            const ctx = c.getContext('2d');
+            const grad = ctx.createLinearGradient(0, 0, 256, 0);
+            grad.addColorStop(0, 'rgba(255,255,255,0)');
+            grad.addColorStop(0.7, 'rgba(255,255,255,0.45)');
+            grad.addColorStop(1, 'rgba(255,255,255,1)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 8, 256, 16);
+            return new THREE.CanvasTexture(c);
+        }
+        const trailTex = createTrailTexture();
+
+        // Build curved ribbon mesh along circular arc for sleek light trails
+        function createArcTrailGeometry(radius, arcLength, segments, widthOffset) {
+            const geo = new THREE.BufferGeometry();
+            const positions = [];
+            const uvs = [];
+            const indices = [];
+
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments; // 0 = tail, 1 = car rear
+                const theta = (t - 1) * arcLength;
+                const x = Math.cos(theta) * (radius + widthOffset);
+                const z = Math.sin(theta) * (radius + widthOffset);
+
+                positions.push(x, -0.12, z);
+                positions.push(x, 0.12, z);
+                uvs.push(t, 0);
+                uvs.push(t, 1);
+
+                if (i < segments) {
+                    const base = i * 2;
+                    indices.push(base, base + 1, base + 2);
+                    indices.push(base + 1, base + 3, base + 2);
+                }
+            }
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+            geo.setIndex(indices);
+            return geo;
+        }
+
+        for (let i = 0; i < CAR_COUNT; i++) {
+            const laneChoice = Math.random();
+            let radius;
+            if (laneChoice < 0.45) {
+                // Directly in/above the main circular canyon
+                radius = CAMERA_RADIUS + (Math.random() - 0.5) * 14;
+            } else {
+                // High altitude highways across the skyline
+                radius = 28 + Math.random() * 145;
+            }
+
+            const altitude = laneChoice < 0.45
+                ? (26 + Math.random() * 55)
+                : (65 + Math.random() * 75);
+
+            const dir = i % 2 === 0 ? 1 : -1;
+            const speed = (0.12 + Math.random() * 0.24) * dir;
+            const startAngle = Math.random() * Math.PI * 2;
+
+            // Orbit pivot so rotating Y moves both car and curved trail seamlessly!
+            const orbitPivot = new THREE.Group();
+            orbitPivot.position.y = altitude;
+            orbitPivot.rotation.y = startAngle;
+
+            const carMesh = new THREE.Mesh(carBodyGeo, darkTechMat);
+            carMesh.position.set(radius, 0, 0);
+            // Face tangent direction
+            carMesh.rotation.y = dir > 0 ? 0 : Math.PI;
+            orbitPivot.add(carMesh);
+
+            // Headlight & Taillight colors
+            const tailColor = dir > 0 ? 0xff0055 : 0x00f3ff;
+            const headColor = dir > 0 ? 0xe0ffff : 0xffaa00;
+
+            const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: glowTexture,
+                color: tailColor,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            }));
+            glowSprite.scale.set(4.5, 2.2, 1);
+            glowSprite.position.set(radius, 0, 0);
+            orbitPivot.add(glowSprite);
+
+            // Dual Curved Light Trails behind the vehicle
+            const arcSpan = (12 + Math.random() * 20) / radius;
+            const signedArc = dir > 0 ? -arcSpan : arcSpan; // Note: rotation.y positive moves +X toward -Z
+
+            const trailMat = new THREE.MeshBasicMaterial({
+                map: trailTex,
+                color: tailColor,
+                transparent: true,
+                opacity: 0.85,
+                blending: THREE.AdditiveBlending,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+
+            // Adjust trail orientation to match Three.js Y-rotation convention:
+            // x' = x*cos(a) + z*sin(a), z' = -x*sin(a) + z*cos(a)
+            // If speed > 0, angle increases, so car at (R, 0, 0) moves towards -Z.
+            // Behind the car is +Z (positive local theta in x=R*cos, z=R*sin).
+            const trailSign = dir > 0 ? -1 : 1;
+            const trailGeoL = createArcTrailGeometry(radius, arcSpan * trailSign, 20, -0.35);
+            const trailGeoR = createArcTrailGeometry(radius, arcSpan * trailSign, 20, 0.35);
+
+            const trailL = new THREE.Mesh(trailGeoL, trailMat);
+            const trailR = new THREE.Mesh(trailGeoR, trailMat);
+            orbitPivot.add(trailL, trailR);
+
+            // Headlight beam sprite
+            const headSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: glowTexture,
+                color: headColor,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                opacity: 0.8
+            }));
+            headSprite.scale.set(2.5, 2.5, 1);
+            headSprite.position.set(radius, 0, dir > 0 ? -1.4 : 1.4);
+            orbitPivot.add(headSprite);
+
+            worldGroup.add(orbitPivot);
+            flyingCars.push({
+                pivot: orbitPivot,
+                speed: speed,
+                baseY: altitude,
+                phase: Math.random() * Math.PI * 2
+            });
+        }
+
+        // --- REAL-TIME PLANAR REFLECTION FOR WET ASPHALT ---
+        const renderTargetScale = 0.5; // Fast 60fps crisp blurred wet reflection
+        let reflectRT = new THREE.WebGLRenderTarget(
+            Math.floor(window.innerWidth * renderTargetScale),
+            Math.floor(window.innerHeight * renderTargetScale),
+            { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }
+        );
+
+        const reflectCamera = camera.clone();
+        const textureMatrix = new THREE.Matrix4();
+
+        const { normalMap, roughnessMap } = createAsphaltTextures();
+
+        const groundShaderMat = new THREE.ShaderMaterial({
+            uniforms: {
+                tReflection: { value: reflectRT.texture },
+                tNormal: { value: normalMap },
+                tRoughness: { value: roughnessMap },
+                textureMatrix: { value: textureMatrix },
+                fogColor: { value: fogColor },
+                fogDensity: { value: scene.fog.density },
+                uTime: { value: 0 }
+            },
+            vertexShader: `
+                uniform mat4 textureMatrix;
+                varying vec4 vMirrorCoord;
+                varying vec2 vUv;
+                varying vec3 vWorldPos;
+                varying float vFogDepth;
+
+                void main() {
+                    vUv = uv;
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vWorldPos = worldPosition.xyz;
+                    vMirrorCoord = textureMatrix * worldPosition;
+                    vec4 mvPosition = viewMatrix * worldPosition;
+                    vFogDepth = -mvPosition.z;
+                    gl_Position = projectionMatrix * mvPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D tReflection;
+                uniform sampler2D tNormal;
+                uniform sampler2D tRoughness;
+                uniform vec3 fogColor;
+                uniform float fogDensity;
+                uniform float uTime;
+
+                varying vec4 vMirrorCoord;
+                varying vec2 vUv;
+                varying vec3 vWorldPos;
+                varying float vFogDepth;
+
+                void main() {
+                    vec2 normUv1 = vUv * 42.0 + vec2(uTime * 0.01, uTime * 0.008);
+                    vec2 normUv2 = vUv * 18.0 - vec2(uTime * 0.005, 0.0);
+                    vec3 n1 = texture2D(tNormal, normUv1).rgb * 2.0 - 1.0;
+                    vec3 n2 = texture2D(tNormal, normUv2).rgb * 2.0 - 1.0;
+                    vec2 ripple = (n1.xy + n2.xy) * 0.5;
+
+                    float puddle = texture2D(tRoughness, vUv * 14.0).r; // darker = smoother puddle
+                    float roughness = clamp(puddle, 0.08, 0.85);
+
+                    // Distort reflection UVs more on rough wet asphalt, sharper in puddles
+                    vec4 coord = vMirrorCoord;
+                    float distStrength = mix(0.03, 0.22, roughness) * coord.w;
+                    coord.xy += ripple * distStrength;
+
+                    // Multi-tap vertical/horizontal micro-blur for realistic wet streakiness
+                    vec3 refl = vec3(0.0);
+                    float blur = roughness * 0.014 * coord.w;
+                    refl += texture2DProj(tReflection, coord + vec4(0.0, -blur * 1.5, 0.0, 0.0)).rgb * 0.25;
+                    refl += texture2DProj(tReflection, coord).rgb * 0.50;
+                    refl += texture2DProj(tReflection, coord + vec4(0.0, blur * 1.5, 0.0, 0.0)).rgb * 0.25;
+
+                    // Base dark wet asphalt + subtle road markings along flight ring
+                    float distCenter = length(vWorldPos.xz);
+                    float laneLine = smoothstep(0.35, 0.0, abs(abs(distCenter - 72.0) - 4.0));
+                    vec3 baseAsphalt = vec3(0.015, 0.016, 0.026) + laneLine * vec3(0.0, 0.12, 0.16);
+
+                    // Fresnel effect
+                    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                    float fresnel = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
+                    float reflectFactor = mix(0.35, 0.92, fresnel) * mix(1.0, 0.45, roughness);
+
+                    vec3 col = mix(baseAsphalt, refl * 1.25, reflectFactor);
+
+                    // Exponential squared fog matching scene
+                    float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+                    col = mix(col, fogColor, clamp(fogFactor, 0.0, 1.0));
+
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `
+        });
+
+        const groundGeo = new THREE.PlaneGeometry(520, 520);
+        groundGeo.rotateX(-Math.PI / 2);
+        const groundMesh = new THREE.Mesh(groundGeo, groundShaderMat);
+        scene.add(groundMesh);
+
+        // --- ATMOSPHERIC RAIN / CYBER DUST PARTICLES ---
+        const rainCount = 2200;
+        const rainGeo = new THREE.BufferGeometry();
+        const rainPositions = new Float32Array(rainCount * 6); // Line segments for rain streaks
+
+        for (let i = 0; i < rainCount; i++) {
+            const x = (Math.random() - 0.5) * 260;
+            const y = Math.random() * 110;
+            const z = (Math.random() - 0.5) * 260;
+            const idx = i * 6;
+            rainPositions[idx] = x;
+            rainPositions[idx + 1] = y;
+            rainPositions[idx + 2] = z;
+            rainPositions[idx + 3] = x + 0.15;
+            rainPositions[idx + 4] = y - 2.4;
+            rainPositions[idx + 5] = z + 0.15;
+        }
+        rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+
+        const rainMat = new THREE.LineBasicMaterial({
+            color: 0x66b8ff,
+            transparent: true,
+            opacity: 0.22,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const rainLines = new THREE.LineSegments(rainGeo, rainMat);
+        scene.add(rainLines);
+
+        // --- CAMERA ANIMATION & RENDER LOOP ---
+        const clock = new THREE.Clock();
+        const lookAtTarget = new THREE.Vector3();
+
+        function updateReflection() {
+            groundMesh.visible = false;
+
+            // Mirror camera across Y = 0 plane
+            reflectCamera.position.set(camera.position.x, -camera.position.y, camera.position.z);
+            const mirroredTarget = new THREE.Vector3(lookAtTarget.x, -lookAtTarget.y, lookAtTarget.z);
+            reflectCamera.up.set(0, 1, 0);
+            reflectCamera.lookAt(mirroredTarget);
+            // Invert roll/projection Y for true mirror
+            reflectCamera.projectionMatrix.copy(camera.projectionMatrix);
+            reflectCamera.updateMatrixWorld();
+
+            // Compute projective texture matrix
+            textureMatrix.set(
+                0.5, 0.0, 0.0, 0.5,
+                0.0, 0.5, 0.0, 0.5,
+                0.0, 0.0, 0.5, 0.5,
+                0.0, 0.0, 0.0, 1.0
+            );
+            textureMatrix.multiply(reflectCamera.projectionMatrix);
+            textureMatrix.multiply(reflectCamera.matrixWorldInverse);
+
+            renderer.setRenderTarget(reflectRT);
+            renderer.clear();
+            renderer.render(scene, reflectCamera);
+            renderer.setRenderTarget(null);
+
+            groundMesh.visible = true;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = Math.min(clock.getDelta(), 0.05);
+            const elapsed = clock.getElapsedTime();
+
+            groundShaderMat.uniforms.uTime.value = elapsed;
+
+            // Rotate central hologram
+            holoGroup.rotation.y = elapsed * 0.25;
+            ring2.rotation.z = Math.sin(elapsed * 0.7) * 0.35;
+
+            // Update Flying Cars
+            for (let i = 0; i < flyingCars.length; i++) {
+                const car = flyingCars[i];
+                car.pivot.rotation.y += car.speed * dt;
+                car.pivot.position.y = car.baseY + Math.sin(elapsed * 1.8 + car.phase) * 0.7;
+            }
+
+            // Animate Rain streaks falling
+            const posArr = rainGeo.attributes.position.array;
+            const fallDist = 68 * dt;
+            for (let i = 0; i < rainCount; i++) {
+                const idx = i * 6;
+                posArr[idx + 1] -= fallDist;
+                posArr[idx + 4] -= fallDist;
+                if (posArr[idx + 1] < 0) {
+                    const resetY = 105 + Math.random() * 10;
+                    posArr[idx + 1] = resetY;
+                    posArr[idx + 4] = resetY - 2.4;
+                }
+            }
+            rainGeo.attributes.position.needsUpdate = true;
+
+            // Smooth Cinematic Circular Camera Flight between Skyscrapers
+            const camAngularSpeed = 0.085;
+            const angle = elapsed * camAngularSpeed;
+
+            // Gentle weaving in altitude and radius for organic drone/spinner feel
+            const dynamicRadius = CAMERA_RADIUS + Math.sin(elapsed * 0.32) * 2.2;
+            const camY = 15.5 + Math.sin(elapsed * 0.23) * 8.5;
+
+            camera.position.set(
+                Math.cos(angle) * dynamicRadius,
+                camY,
+                Math.sin(angle) * dynamicRadius
+            );
+
+            // Look ahead along the circular canyon, slightly tilting up toward neon towers & flying traffic
+            const lookAheadAngle = angle + 0.36;
+            const lookRadius = CAMERA_RADIUS + Math.sin(elapsed * 0.27 + 1.0) * 4.5;
+            const lookY = camY + 5.5 + Math.sin(elapsed * 0.19) * 5.0;
+
+            lookAtTarget.set(
+                Math.cos(lookAheadAngle) * lookRadius,
+                lookY,
+                Math.sin(lookAheadAngle) * lookRadius
+            );
+
+            camera.up.set(0, 1, 0);
+            camera.lookAt(lookAtTarget);
+
+            // Subtle cinematic banking roll
+            camera.rotateZ(Math.sin(elapsed * 0.32) * 0.045 - 0.03);
+
+            // Render wet street reflection then main view
+            updateReflection();
+            renderer.render(scene, camera);
+        }
+
+        // --- WINDOW RESIZE ---
+        window.addEventListener('resize', () => {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+
+            reflectCamera.aspect = w / h;
+            reflectCamera.updateProjectionMatrix();
+
+            renderer.setSize(w, h);
+            reflectRT.setSize(
+                Math.floor(w * renderTargetScale),
+                Math.floor(h * renderTargetScale)
+            );
+        });
+
+        animate();
+    </script>
+</body>
+</html>

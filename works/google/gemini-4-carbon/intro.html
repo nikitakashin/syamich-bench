@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>AI Native Сямыч — Intro</title>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  html, body {
+    width: 100%;
+    height: 100%;
+    background-color: #020206;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Ambient backdrop glow for widescreen monitors */
+  #ambient {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    filter: blur(60px) brightness(0.35) saturate(1.6);
+    transform: scale(1.15);
+    pointer-events: none;
+    z-index: 0;
+  }
+  /* Main 9:16 1080x1920 stage */
+  #stage-wrap {
+    position: relative;
+    z-index: 1;
+    width: min(100vw, calc(100vh * 9 / 16));
+    height: min(100vh, calc(100vw * 16 / 9));
+    aspect-ratio: 9 / 16;
+    background: #04040c;
+    box-shadow: 0 0 90px rgba(0, 243, 255, 0.12), 0 0 1px rgba(255, 255, 255, 0.18);
+    overflow: hidden;
+  }
+  #screen {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+</style>
+</head>
+<body>
+  <canvas id="ambient" width="270" height="480"></canvas>
+  <div id="stage-wrap">
+    <canvas id="screen" width="1080" height="1920"></canvas>
+  </div>
+
+<script>
+(() => {
+  const W = 1080;
+  const H = 1920;
+  const CX = W / 2;
+  const CY = H / 2;
+  const DURATION = 5000; // 5.0 seconds exact loop
+
+  const screenCanvas = document.getElementById('screen');
+  const sCtx = screenCanvas.getContext('2d', { alpha: false });
+
+  const ambientCanvas = document.getElementById('ambient');
+  const aCtx = ambientCanvas.getContext('2d', { alpha: false });
+
+  // Offscreen render buffer (1080x1920)
+  const mainCanvas = document.createElement('canvas');
+  mainCanvas.width = W;
+  mainCanvas.height = H;
+  const ctx = mainCanvas.getContext('2d', { alpha: false });
+
+  // Multi-scale bloom buffers for hardware-accelerated neon glow
+  const bloom1 = document.createElement('canvas');
+  bloom1.width = 270;
+  bloom1.height = 480;
+  const bCtx1 = bloom1.getContext('2d');
+
+  const bloom2 = document.createElement('canvas');
+  bloom2.width = 90;
+  bloom2.height = 160;
+  const bCtx2 = bloom2.getContext('2d');
+
+  // Pre-rendered subtle noise tile for cinematic texture
+  const noiseCanvas = document.createElement('canvas');
+  noiseCanvas.width = 180;
+  noiseCanvas.height = 180;
+  const nCtx = noiseCanvas.getContext('2d');
+  const nImg = nCtx.createImageData(180, 180);
+  for (let i = 0; i < nImg.data.length; i += 4) {
+    const v = (Math.random() * 255) | 0;
+    nImg.data[i] = v;
+    nImg.data[i + 1] = v;
+    nImg.data[i + 2] = v;
+    nImg.data[i + 3] = 16;
+  }
+  nCtx.putImageData(nImg, 0, 0);
+
+  // Deterministic hash for repeatable beat-synced glitches
+  function hash(n) {
+    const x = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
+    return x - Math.floor(x);
+  }
+
+  function clamp(v, min, max) {
+    return v < min ? min : v > max ? max : v;
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function easeOutExpo(x) {
+    return x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
+  }
+
+  function easeInOutCubic(x) {
+    return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  }
+
+  function easeOutBack(x) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+  }
+
+  function chamferRect(c, x, y, w, h, cut) {
+    c.beginPath();
+    c.moveTo(x + cut, y);
+    c.lineTo(x + w - cut, y);
+    c.lineTo(x + w, y + cut);
+    c.lineTo(x + w, y + h - cut);
+    c.lineTo(x + w - cut, y + h);
+    c.lineTo(x + cut, y + h);
+    c.lineTo(x, y + h - cut);
+    c.lineTo(x, y + cut);
+    c.closePath();
+  }
+
+  // 3D Icosahedron geometry for the AI Neural Core
+  const phi = (1 + Math.sqrt(5)) / 2;
+  const rawVerts = [
+    [-1,  phi, 0], [ 1,  phi, 0], [-1, -phi, 0], [ 1, -phi, 0],
+    [0, -1,  phi], [0,  1,  phi], [0, -1, -phi], [0,  1, -phi],
+    [ phi, 0, -1], [ phi, 0,  1], [-phi, 0, -1], [-phi, 0,  1]
+  ];
+  const icoVerts = rawVerts.map(v => {
+    const len = Math.hypot(v[0], v[1], v[2]);
+    return [v[0] / len, v[1] / len, v[2] / len];
+  });
+  const icoEdges = [];
+  for (let i = 0; i < icoVerts.length; i++) {
+    for (let j = i + 1; j < icoVerts.length; j++) {
+      const d = Math.hypot(
+        icoVerts[i][0] - icoVerts[j][0],
+        icoVerts[i][1] - icoVerts[j][1],
+        icoVerts[i][2] - icoVerts[j][2]
+      );
+      if (d < 1.2) icoEdges.push([i, j]);
+    }
+  }
+
+  // Pre-generated 3D cyber particles & floating code tokens
+  const glyphs = ['01', '{ }', '</>', 'AI', '⚡', 'fn()', '>>', '∞', 'LLM', 'GPU', '0xFF', 'SYNC'];
+  const particles = Array.from({ length: 85 }, (_, i) => ({
+    angle: hash(i * 3.1) * Math.PI * 2,
+    radius: 90 + hash(i * 7.7) * 680,
+    zBase: hash(i * 13.3),
+    speed: 1 + Math.floor(hash(i * 5.9) * 3), // integer harmonic for seamless loop
+    isCyan: hash(i * 2.3) > 0.42,
+    size: 2 + hash(i * 19.1) * 4.5,
+    glyph: hash(i * 23.7) > 0.68 ? glyphs[i % glyphs.length] : null
+  }));
+
+  // Floating background code streams
+  const codeLines = [
+    'const ai = await NeuralCore.boot({ mode: "AI_NATIVE" });',
+    'vibe.compile({ flow: "MAX", latency: "0ms" });',
+    'import { Syamych } from "@future/vibecoding";',
+    'tensor.ignite(1080, 1920, { neon: true });',
+    'while (alive) { create(); ship(); evolve(); }',
+    'prompt >> "Синтез нейросети и чистого вайба"',
+    'model.weights.synchronize(1.000); // READY',
+    'export default Channel.topTier("СЯМЫЧ");'
+  ];
+
+  function rotate3D(v, rx, ry, rz) {
+    let [x, y, z] = v;
+    // Rotate X
+    let cy = Math.cos(rx), sy = Math.sin(rx);
+    let y1 = y * cy - z * sy;
+    let z1 = y * sy + z * cy;
+    // Rotate Y
+    let cx = Math.cos(ry), sx = Math.sin(ry);
+    let x2 = x * cx + z1 * sx;
+    let z2 = -x * sx + z1 * cx;
+    // Rotate Z
+    let cz = Math.cos(rz), sz = Math.sin(rz);
+    let x3 = x2 * cz - y1 * sz;
+    let y3 = x2 * sz + y1 * cz;
+    return [x3, y3, z2];
+  }
+
+  // Draw jagged electric arc between two 2D points
+  function drawLightning(c, x1, y1, x2, y2, displace, seed, color, width) {
+    c.save();
+    c.strokeStyle = color;
+    c.lineWidth = width;
+    c.beginPath();
+    c.moveTo(x1, y1);
+    const segments = 7;
+    for (let i = 1; i < segments; i++) {
+      const f = i / segments;
+      const nx = lerp(x1, x2, f) + (hash(seed + i * 11.7) - 0.5) * displace;
+      const ny = lerp(y1, y2, f) + (hash(seed + i * 29.3) - 0.5) * displace;
+      c.lineTo(nx, ny);
+    }
+    c.lineTo(x2, y2);
+    c.stroke();
+    c.restore();
+  }
+
+  // Hero Font Size calibration cache
+  let heroFontSize = 176;
+  let fontCalibrated = false;
+  const FONT_DISPLAY = '900 100px system-ui, -apple-system, "Segoe UI", Roboto, "Arial Black", sans-serif';
+  const FONT_MONO = '"SF Mono", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace';
+
+  function calibrateHeroFont() {
+    if (fontCalibrated) return;
+    ctx.save();
+    ctx.font = FONT_DISPLAY;
+    const w100 = ctx.measureText('СЯМЫЧ').width || 420;
+    heroFontSize = Math.floor((830 / w100) * 100);
+    ctx.restore();
+    fontCalibrated = true;
+  }
+
+  function renderScene(t) {
+    calibrateHeroFont();
+
+    // 120 BPM rhythmic pulse (10 exact beats per 5s loop)
+    const beatPhase = (t * 10) % 1;
+    const beatKick = Math.pow(1 - beatPhase, 3.2);
+
+    // Timeline envelopes
+    // 0.00 - 0.42: Neural build-up & Vibecoding terminal
+    // 0.42 - 0.88: CLIMAX ("СЯМЫЧ" + "AI Native")
+    // 0.88 - 1.00: Cyberpunk glitch dissolve into seamless loop
+    const buildProgress = clamp(t / 0.42, 0, 1);
+    const isClimax = t >= 0.42 && t < 0.91;
+    const climaxIn = clamp((t - 0.42) / 0.07, 0, 1);
+    const outroProgress = clamp((t - 0.87) / 0.13, 0, 1);
+    const loopFadeIn = clamp(t / 0.06, 0, 1);
+
+    // Impact shake at t = 0.42
+    let shakeX = 0, shakeY = 0;
+    if (t >= 0.415 && t < 0.48) {
+      const decay = 1 - (t - 0.415) / 0.065;
+      const mag = 32 * decay * decay;
+      const bucket = Math.floor(t * 240);
+      shakeX = (hash(bucket * 3.7) - 0.5) * mag;
+      shakeY = (hash(bucket * 9.1) - 0.5) * mag;
+    }
+
+    ctx.save();
+
+    // 1. DEEP CYBER BACKGROUND
+    const bgGrad = ctx.createRadialGradient(
+      CX, CY - 60, 40,
+      CX, CY, 1150
+    );
+    const coreGlow = isClimax ? 0.24 + beatKick * 0.08 : 0.14 * buildProgress;
+    bgGrad.addColorStop(0, `rgba(28, 12, 64, ${0.85 + coreGlow})`);
+    bgGrad.addColorStop(0.45, '#070614');
+    bgGrad.addColorStop(1, '#020206');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.translate(shakeX, shakeY);
+
+    // Ambient Dual Neon Nebula Clouds
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const orbAngle = t * Math.PI * 2;
+    const c1x = CX + Math.cos(orbAngle) * 220;
+    const c1y = CY - 120 + Math.sin(orbAngle) * 180;
+    const g1 = ctx.createRadialGradient(c1x, c1y, 10, c1x, c1y, 620);
+    g1.addColorStop(0, `rgba(0, 243, 255, ${0.11 + beatKick * 0.05})`);
+    g1.addColorStop(1, 'rgba(0, 243, 255, 0)');
+    ctx.fillStyle = g1;
+    ctx.fillRect(0, 0, W, H);
+
+    const c2x = CX - Math.cos(orbAngle) * 240;
+    const c2y = CY + 140 - Math.sin(orbAngle) * 160;
+    const g2 = ctx.createRadialGradient(c2x, c2y, 10, c2x, c2y, 650);
+    g2.addColorStop(0, `rgba(255, 0, 128, ${0.10 + beatKick * 0.05})`);
+    g2.addColorStop(1, 'rgba(255, 0, 128, 0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // 2. PERSPECTIVE 3D CYBER HORIZON GRIDS (Floor & Ceiling, seamlessly looping)
+    ctx.save();
+    const gridAlpha = 0.22 + beatKick * 0.10;
+    const horizonTop = 500;
+    const horizonBot = 1420;
+    const zMove = (t * 8) % 1; // exact integer multiple for seamless loop
+
+    // Vertical perspective rays
+    ctx.lineWidth = 1.5;
+    for (let i = -10; i <= 10; i++) {
+      const xNear = CX + i * 190;
+      const xFar = CX + i * 24;
+
+      // Bottom grid
+      const gradB = ctx.createLinearGradient(0, horizonBot, 0, H);
+      gradB.addColorStop(0, 'rgba(0, 243, 255, 0)');
+      gradB.addColorStop(0.4, `rgba(0, 243, 255, ${gridAlpha * 0.7})`);
+      gradB.addColorStop(1, `rgba(168, 85, 247, ${gridAlpha})`);
+      ctx.strokeStyle = gradB;
+      ctx.beginPath();
+      ctx.moveTo(xFar, horizonBot);
+      ctx.lineTo(xNear, H);
+      ctx.stroke();
+
+      // Top grid
+      const gradT = ctx.createLinearGradient(0, horizonTop, 0, 0);
+      gradT.addColorStop(0, 'rgba(255, 0, 128, 0)');
+      gradT.addColorStop(0.5, `rgba(168, 85, 247, ${gridAlpha * 0.55})`);
+      gradT.addColorStop(1, `rgba(0, 243, 255, ${gridAlpha * 0.8})`);
+      ctx.strokeStyle = gradT;
+      ctx.beginPath();
+      ctx.moveTo(xFar, horizonTop);
+      ctx.lineTo(xNear, 0);
+      ctx.stroke();
+    }
+
+    // Horizontal moving depth lines
+    for (let j = 0; j < 10; j++) {
+      const depth = (j + zMove) / 10;
+      const p = Math.pow(depth, 2.3);
+
+      const yBot = horizonBot + p * (H - horizonBot);
+      ctx.strokeStyle = `rgba(0, 243, 255, ${p * gridAlpha * 1.2})`;
+      ctx.beginPath();
+      ctx.moveTo(0, yBot);
+      ctx.lineTo(W, yBot);
+      ctx.stroke();
+
+      const yTop = horizonTop - p * horizonTop;
+      ctx.strokeStyle = `rgba(255, 0, 128, ${p * gridAlpha * 0.9})`;
+      ctx.beginPath();
+      ctx.moveTo(0, yTop);
+      ctx.lineTo(W, yTop);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 3. BACKGROUND VIBECODING WATERFALL
+    ctx.save();
+    ctx.font = `600 21px ${FONT_MONO}`;
+    const codeOpacity = isClimax ? 0.13 : 0.26 * loopFadeIn;
+    for (let i = 0; i < 14; i++) {
+      const scrollY = ((i * 145 + t * H * 1.0) % (H + 160)) - 80;
+      const xPos = (i % 2 === 0) ? 58 : 440;
+      const line = codeLines[i % codeLines.length];
+      ctx.fillStyle = i % 3 === 0
+        ? `rgba(0, 243, 255, ${codeOpacity})`
+        : `rgba(185, 140, 255, ${codeOpacity * 0.85})`;
+      ctx.fillText(line, xPos, scrollY);
+    }
+    ctx.restore();
+
+    // 4. 3D WARP PARTICLES & CODE GLYPHS
+    ctx.save();
+    for (let i = 0; i < particles.length; i++) {
+      const pt = particles[i];
+      // Seamless cyclic depth [0..1)
+      let z = (pt.zBase - t * pt.speed) % 1;
+      if (z < 0) z += 1;
+
+      // Implode slightly right before drop (0.34 -> 0.42)
+      let pull = 1;
+      if (t > 0.30 && t < 0.42) {
+        const impl = (t - 0.30) / 0.12;
+        pull = 1 - easeInOutCubic(impl) * 0.78;
+      }
+
+      const perspective = 1 / (0.16 + z * 1.4);
+      const r = pt.radius * perspective * pull;
+      const ang = pt.angle + t * Math.PI * 2;
+      const px = CX + Math.cos(ang) * r;
+      const py = CY + Math.sin(ang) * r * 1.25;
+
+      if (px < -80 || px > W + 80 || py < -80 || py > H + 80) continue;
+
+      const alpha = clamp((1 - z) * 1.15, 0, 1) * (1 - outroProgress * 0.6);
+      const col = pt.isCyan
+        ? `rgba(0, 243, 255, ${alpha})`
+        : `rgba(255, 0, 140, ${alpha})`;
+
+      if (pt.glyph && z < 0.72) {
+        ctx.font = `700 ${Math.round(14 + (1 - z) * 18)}px ${FONT_MONO}`;
+        ctx.fillStyle = col;
+        ctx.fillText(pt.glyph, px, py);
+      } else {
+        // Streak line toward center for warp energy
+        const prevR = r * 0.90;
+        const px0 = CX + Math.cos(ang) * prevR;
+        const py0 = CY + Math.sin(ang) * prevR * 1.25;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = pt.size * (1 - z * 0.6);
+        ctx.beginPath();
+        ctx.moveTo(px0, py0);
+        ctx.lineTo(px, py);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // 5. 3D AI NEURAL POLYHEDRON (Spins up in Phase 1, expands into Halo in Climax)
+    ctx.save();
+    let polyRadius = 230;
+    let polyAlpha = 0.85;
+    let polyY = CY - 110;
+
+    if (t < 0.42) {
+      const p = easeOutExpo(clamp(t / 0.18, 0, 1));
+      const charge = t > 0.32 ? 1 - easeInOutCubic((t - 0.32) / 0.10) * 0.55 : 1;
+      polyRadius = (130 + 130 * p + beatKick * 18) * charge;
+      polyAlpha = clamp(t / 0.08, 0, 1) * 0.95;
+      polyY = CY - 130;
+    } else {
+      // Expanded rotating neural halo behind logo
+      const expand = easeOutExpo(climaxIn);
+      polyRadius = lerp(120, 415, expand) + beatKick * 16;
+      polyAlpha = (0.34 + beatKick * 0.12) * (1 - outroProgress);
+      polyY = CY - 20;
+    }
+
+    const rx = t * Math.PI * 2;
+    const ry = t * Math.PI * 4;
+    const rz = Math.sin(t * Math.PI * 2) * 0.35;
+
+    const proj = icoVerts.map(v => {
+      const [x, y, z] = rotate3D(v, rx, ry, rz);
+      const scale = 900 / (900 + z * polyRadius);
+      return {
+        x: CX + x * polyRadius * scale,
+        y: polyY + y * polyRadius * scale,
+        z
+      };
+    });
+
+    // Wireframe connections
+    ctx.lineWidth = isClimax ? 2.2 : 3.0;
+    for (let i = 0; i < icoEdges.length; i++) {
+      const [a, b] = icoEdges[i];
+      const pa = proj[a];
+      const pb = proj[b];
+      const depthAlpha = clamp(0.65 - (pa.z + pb.z) * 0.25, 0.15, 1) * polyAlpha;
+      ctx.strokeStyle = i % 2 === 0
+        ? `rgba(0, 243, 255, ${depthAlpha})`
+        : `rgba(192, 68, 255, ${depthAlpha})`;
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+    }
+
+    // Glowing synaptic nodes
+    for (let i = 0; i < proj.length; i++) {
+      const p = proj[i];
+      const rNode = (isClimax ? 4.5 : 6.5) * (1 - p.z * 0.25);
+      ctx.fillStyle = `rgba(255, 255, 255, ${polyAlpha})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(2, rNode), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Electric arcs surging during charge-up (0.18 -> 0.42) and micro-glitches
+    if ((t > 0.16 && t < 0.42) || (t > 0.64 && t < 0.68)) {
+      const seedBase = Math.floor(t * 60);
+      const arcCount = t < 0.42 ? Math.floor(3 + buildProgress * 6) : 4;
+      for (let k = 0; k < arcCount; k++) {
+        const va = proj[(seedBase + k * 3) % proj.length];
+        const vb = proj[(seedBase + k * 7 + 2) % proj.length];
+        drawLightning(
+          ctx,
+          va.x, va.y,
+          vb.x, vb.y,
+          48,
+          seedBase * 13 + k,
+          k % 2 === 0 ? '#00f3ff' : '#ff0080',
+          2.6
+        );
+      }
+    }
+    ctx.restore();
+
+    // 6. PHASE 1: VIBECODING TERMINAL PROMPT & CHARGE RING (0.00 -> 0.42)
+    if (t < 0.42) {
+      const termIn = easeOutExpo(clamp((t - 0.02) / 0.10, 0, 1));
+      const termOut = t > 0.36 ? 1 - easeInOutCubic((t - 0.36) / 0.06) : 1;
+      const termAlpha = termIn * termOut;
+
+      ctx.save();
+      ctx.globalAlpha = termAlpha;
+
+      // Rotating HUD rings around AI Core
+      ctx.translate(CX, CY - 130);
+      ctx.strokeStyle = 'rgba(0, 243, 255, 0.45)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, 310, -Math.PI / 2, -Math.PI / 2 + buildProgress * Math.PI * 2);
+      ctx.stroke();
+
+      ctx.setLineDash([14, 18]);
+      ctx.strokeStyle = 'rgba(255, 0, 128, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 340, t * 8, t * 8 + Math.PI * 1.35);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Vibecoding Terminal Card below core
+      ctx.save();
+      ctx.globalAlpha = termAlpha;
+      const cardW = 880;
+      const cardH = 290;
+      const cardX = CX - cardW / 2;
+      const cardY = 1140 + (1 - termIn) * 60;
+
+      ctx.fillStyle = 'rgba(8, 10, 24, 0.86)';
+      chamferRect(ctx, cardX, cardY, cardW, cardH, 24);
+      ctx.fill();
+
+      ctx.lineWidth = 2.5;
+      const borderGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardW, cardY + cardH);
+      borderGrad.addColorStop(0, '#00f3ff');
+      borderGrad.addColorStop(0.5, '#8a2be2');
+      borderGrad.addColorStop(1, '#ff0080');
+      ctx.strokeStyle = borderGrad;
+      ctx.stroke();
+
+      // Terminal header bar
+      ctx.fillStyle = 'rgba(0, 243, 255, 0.12)';
+      ctx.fillRect(cardX + 4, cardY + 4, cardW - 8, 48);
+      ctx.font = `700 20px ${FONT_MONO}`;
+      ctx.fillStyle = '#00f3ff';
+      ctx.fillText('● ● ●   NEURAL_TERMINAL // VIBECODING_ENGINE', cardX + 28, cardY + 35);
+
+      // Typing text lines
+      const l1Full = '> prompt: "Запусти AI-вселенную Сямыча"';
+      const l1Count = Math.floor(clamp((t - 0.04) / 0.14, 0, 1) * l1Full.length);
+      ctx.font = `700 28px ${FONT_MONO}`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(l1Full.slice(0, l1Count) + (t < 0.19 ? '█' : ''), cardX + 34, cardY + 108);
+
+      if (t > 0.16) {
+        const l2Full = '> compiling_vibe: [NEON + CODE + AI_NATIVE]';
+        const l2Count = Math.floor(clamp((t - 0.16) / 0.11, 0, 1) * l2Full.length);
+        ctx.fillStyle = '#00f3ff';
+        ctx.fillText(l2Full.slice(0, l2Count), cardX + 34, cardY + 160);
+      }
+
+      if (t > 0.25) {
+        const pct = Math.min(100, Math.floor(((t - 0.25) / 0.15) * 100));
+        const bars = Math.floor(pct / 5);
+        const barStr = '█'.repeat(bars) + '░'.repeat(20 - bars);
+        ctx.fillStyle = pct >= 95 ? '#b8ff00' : '#ff2a9d';
+        ctx.fillText(`> OVERDRIVE: [${barStr}] ${pct}%`, cardX + 34, cardY + 216);
+      }
+
+      // Percentage readout inside core
+      ctx.font = `900 62px ${FONT_MONO}`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(`${Math.min(100, Math.floor(buildProgress * 104))}%`, CX, CY - 110);
+      ctx.font = `700 22px ${FONT_MONO}`;
+      ctx.fillStyle = '#00f3ff';
+      ctx.fillText('SYNAPTIC SYNC', CX, CY - 68);
+      ctx.restore();
+    }
+
+    // 7. SHOCKWAVE EXPLOSION AT CLIMAX DROP (t = 0.42)
+    if (t >= 0.415 && t < 0.65) {
+      const swT = (t - 0.415) / 0.235;
+      const swEase = easeOutExpo(swT);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      // Expanding Cyan Shockwave
+      ctx.strokeStyle = `rgba(0, 243, 255, ${(1 - swT) * 0.9})`;
+      ctx.lineWidth = (1 - swT) * 28 + 2;
+      ctx.beginPath();
+      ctx.arc(CX, CY - 30, swEase * 980, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Secondary Magenta Shockwave
+      const swT2 = clamp((t - 0.435) / 0.21, 0, 1);
+      if (swT2 > 0) {
+        ctx.strokeStyle = `rgba(255, 0, 128, ${(1 - swT2) * 0.75})`;
+        ctx.lineWidth = (1 - swT2) * 18 + 2;
+        ctx.beginPath();
+        ctx.arc(CX, CY - 30, easeOutExpo(swT2) * 820, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // 8. CLIMAX HERO LOCKUP: «СЯМЫЧ» + «AI Native» (0.42 -> 0.92)
+    if (t >= 0.42 && t < 0.96) {
+      const enter = easeOutBack(clamp((t - 0.42) / 0.085, 0, 1));
+      const dissolve = clamp((t - 0.88) / 0.08, 0, 1);
+      const scale = lerp(1.48, 1.0, clamp((t - 0.42) / 0.075, 0, 1)) + beatKick * 0.018 + dissolve * 0.18;
+      const alpha = (1 - easeInOutCubic(dissolve));
+
+      // Micro-glitch jitter during entrance, beat hits, and outro
+      let gx = 0, gy = 0;
+      const isMicroGlitch = (t < 0.465) || (t > 0.645 && t < 0.67) || (t > 0.785 && t < 0.805) || (t > 0.88);
+      if (isMicroGlitch) {
+        const gBucket = Math.floor(t * 90);
+        const amp = t > 0.88 ? 42 * dissolve : 16;
+        gx = (hash(gBucket * 5.1) - 0.5) * amp;
+        gy = (hash(gBucket * 8.3) - 0.5) * (amp * 0.35);
+      }
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(CX + gx, CY - 55 + gy);
+      ctx.scale(scale, dissolve > 0.4 ? Math.max(0.04, 1 - (dissolve - 0.4) * 1.6) : scale);
+
+      // Decorative Tech Halo Ring & Framing Brackets behind text
+      ctx.save();
+      ctx.strokeStyle = `rgba(0, 243, 255, ${0.28 + beatKick * 0.15})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 20, 445, -0.35, 0.35);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 20, 445, Math.PI - 0.35, Math.PI + 0.35);
+      ctx.stroke();
+
+      // Subtle dark contrast aura so hero typography pops 100% cleanly
+      const backGlow = ctx.createRadialGradient(0, 25, 40, 0, 25, 520);
+      backGlow.addColorStop(0, 'rgba(4, 4, 14, 0.82)');
+      backGlow.addColorStop(0.65, 'rgba(4, 4, 14, 0.48)');
+      backGlow.addColorStop(1, 'rgba(4, 4, 14, 0)');
+      ctx.fillStyle = backGlow;
+      ctx.fillRect(-520, -260, 1040, 560);
+      ctx.restore();
+
+      // Brief cyber-decode on first 40ms, then crystal clear «СЯМЫЧ»
+      let titleText = 'СЯМЫЧ';
+      if (t < 0.442) {
+        titleText = t < 0.431 ? 'С#М_Ч' : 'СЯMЫ4';
+      }
+
+      ctx.font = `900 ${heroFontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Arial Black", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // RGB Split Chromatic Layers on beats & glitches
+      const rgbOffset = isMicroGlitch ? 13 : 4 + beatKick * 5;
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = 'rgba(0, 243, 255, 0.85)';
+      ctx.fillText(titleText, -rgbOffset, -18);
+      ctx.fillStyle = 'rgba(255, 0, 128, 0.85)';
+      ctx.fillText(titleText, rgbOffset, -14);
+      ctx.restore();
+
+      // Deep Neon Drop Glow
+      ctx.save();
+      ctx.shadowColor = '#00f3ff';
+      ctx.shadowBlur = 38 + beatKick * 18;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(titleText, 0, -16);
+      ctx.restore();
+
+      // Crisp Metallic-White Gradient Fill + Moving Laser Sheen
+      const sheenX = lerp(-620, 620, clamp((t - 0.46) / 0.36, 0, 1));
+      const textGrad = ctx.createLinearGradient(sheenX - 180, -110, sheenX + 180, 80);
+      textGrad.addColorStop(0, '#eefaff');
+      textGrad.addColorStop(0.42, '#ffffff');
+      textGrad.addColorStop(0.5, '#9efeff');
+      textGrad.addColorStop(0.58, '#ffffff');
+      textGrad.addColorStop(1, '#e6d8ff');
+
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = 'rgba(6, 8, 22, 0.9)';
+      ctx.strokeText(titleText, 0, -16);
+
+      ctx.fillStyle = textGrad;
+      ctx.fillText(titleText, 0, -16);
+
+      // Subtitle Badge: «AI Native» right underneath «СЯМЫЧ»
+      const subEnter = easeOutExpo(clamp((t - 0.455) / 0.09, 0, 1));
+      ctx.save();
+      ctx.globalAlpha = alpha * subEnter;
+      ctx.translate(0, 138 + (1 - subEnter) * 32);
+
+      const badgeW = 540;
+      const badgeH = 104;
+      const bX = -badgeW / 2;
+      const bY = -badgeH / 2;
+
+      // Glassmorphic cyberpunk plaque
+      ctx.fillStyle = 'rgba(8, 12, 28, 0.9)';
+      chamferRect(ctx, bX, bY, badgeW, badgeH, 20);
+      ctx.fill();
+
+      const badgeBorder = ctx.createLinearGradient(bX, bY, bX + badgeW, bY + badgeH);
+      badgeBorder.addColorStop(0, '#00f3ff');
+      badgeBorder.addColorStop(0.5, '#a855f7');
+      badgeBorder.addColorStop(1, '#ff0080');
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = '#00f3ff';
+      ctx.shadowBlur = 22;
+      ctx.strokeStyle = badgeBorder;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Side energy wings flanking «AI Native»
+      ctx.strokeStyle = '#00f3ff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(bX - 95, 0);
+      ctx.lineTo(bX - 22, 0);
+      ctx.moveTo(bX + badgeW + 22, 0);
+      ctx.lineTo(bX + badgeW + 95, 0);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ff0080';
+      ctx.fillRect(bX - 108, -5, 10, 10);
+      ctx.fillRect(bX + badgeW + 98, -5, 10, 10);
+
+      // Crisp «AI Native» text
+      ctx.font = `800 66px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const subGrad = ctx.createLinearGradient(-200, 0, 200, 0);
+      subGrad.addColorStop(0, '#00f3ff');
+      subGrad.addColorStop(0.48, '#ffffff');
+      subGrad.addColorStop(1, '#ff59b6');
+
+      ctx.shadowColor = 'rgba(0, 243, 255, 0.75)';
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = subGrad;
+      ctx.fillText('AI Native', 0, 2);
+      ctx.shadowBlur = 0;
+
+      // Tagline micro-caption underneath badge
+      ctx.font = `700 22px ${FONT_MONO}`;
+      ctx.fillStyle = `rgba(184, 255, 0, ${0.85 * subEnter})`;
+      ctx.fillText('NEURAL  //  VIBECODING  //  FUTURE', 0, 88);
+
+      ctx.restore();
+      ctx.restore();
+    }
+
+    // 9. CYBERPUNK CAMERA HUD & EQUALIZER OVERLAY (Always active, grounds the 9:16 frame)
+    ctx.save();
+    const hudAlpha = 0.78;
+    ctx.strokeStyle = `rgba(0, 243, 255, ${hudAlpha * 0.55})`;
+    ctx.lineWidth = 3;
+
+    // 4 Corner Framing Brackets
+    const pad = 48;
+    const len = 56;
+    ctx.beginPath();
+    // Top-left
+    ctx.moveTo(pad, pad + len); ctx.lineTo(pad, pad); ctx.lineTo(pad + len, pad);
+    // Top-right
+    ctx.moveTo(W - pad - len, pad); ctx.lineTo(W - pad, pad); ctx.lineTo(W - pad, pad + len);
+    // Bottom-left
+    ctx.moveTo(pad, H - pad - len); ctx.lineTo(pad, H - pad); ctx.lineTo(pad + len, H - pad);
+    // Bottom-right
+    ctx.moveTo(W - pad - len, H - pad); ctx.lineTo(W - pad, H - pad); ctx.lineTo(W - pad, H - pad - len);
+    ctx.stroke();
+
+    // Top Telemetry Bar
+    ctx.font = `700 22px ${FONT_MONO}`;
+    ctx.fillStyle = 'rgba(0, 243, 255, 0.85)';
+    ctx.textAlign = 'left';
+    ctx.fillText('SYS.AI_NATIVE // v5.0', pad + 22, pad + 38);
+
+    // Blinking REC / LIVE indicator + Timecode
+    const blink = Math.sin(t * Math.PI * 10) > -0.2;
+    ctx.textAlign = 'right';
+    const sec = Math.floor(t * 5);
+    const frames = String(Math.floor((t * 5 % 1) * 60)).padStart(2, '0');
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.fillText(`00:0${sec}:${frames}`, W - pad - 22, pad + 38);
+
+    if (blink) {
+      ctx.fillStyle = '#ff0055';
+      ctx.beginPath();
+      ctx.arc(W - pad - 148, pad + 30, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Bottom Audio-Reactive-Style Energy Spectrum Bars
+    const barCount = 32;
+    const totalBarW = 640;
+    const startX = CX - totalBarW / 2;
+    const baseY = H - pad - 22;
+    for (let i = 0; i < barCount; i++) {
+      const centerWeight = 1 - Math.abs(i - (barCount - 1) / 2) / (barCount / 2);
+      const wave = 0.5 + 0.5 * Math.sin(t * Math.PI * 12 + i * 0.55);
+      const energyBoost = isClimax ? 1.45 : 0.75 + buildProgress * 0.5;
+      const bh = (8 + (wave * 44 + beatKick * 28) * centerWeight) * energyBoost;
+      ctx.fillStyle = i % 2 === 0
+        ? `rgba(0, 243, 255, ${0.45 + centerWeight * 0.45})`
+        : `rgba(255, 0, 128, ${0.45 + centerWeight * 0.45})`;
+      ctx.fillRect(startX + i * 20, baseY - bh, 12, bh);
+    }
+
+    // Bottom Progress / Loop Laser Line
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.fillRect(pad + 80, H - pad - 2, W - (pad + 80) * 2, 3);
+    const progGrad = ctx.createLinearGradient(pad + 80, 0, W - pad - 80, 0);
+    progGrad.addColorStop(0, '#00f3ff');
+    progGrad.addColorStop(1, '#ff0080');
+    ctx.fillStyle = progGrad;
+    ctx.fillRect(pad + 80, H - pad - 2, (W - (pad + 80) * 2) * t, 3);
+    ctx.restore();
+
+    // 10. IMPACT FLASH & SEAMLESS CRT COLLAPSE AT LOOP BOUNDARY
+    if (t >= 0.415 && t < 0.475) {
+      const fAlpha = Math.pow(1 - (t - 0.415) / 0.06, 2.4) * 0.85;
+      ctx.fillStyle = `rgba(215, 252, 255, ${fAlpha})`;
+      ctx.fillRect(-60, -60, W + 120, H + 120);
+    }
+
+    // Seamless transition laser flash at 0.94 -> 1.00 / 0.00 -> 0.03
+    if (t > 0.93) {
+      const endT = (t - 0.93) / 0.07;
+      ctx.fillStyle = `rgba(2, 2, 6, ${easeInOutCubic(endT) * 0.88})`;
+      ctx.fillRect(0, 0, W, H);
+
+      // Horizontal collapsing cyber-beam
+      const beamW = W * (1 - endT * 0.75);
+      const beamH = Math.max(2, (1 - endT) * 26);
+      ctx.fillStyle = `rgba(0, 243, 255, ${(1 - endT) * 0.95})`;
+      ctx.fillRect(CX - beamW / 2, CY - beamH / 2, beamW, beamH);
+    }
+
+    ctx.restore();
+
+    // POST-PROCESSING COMPOSITE TO DISPLAY CANVAS
+    // Pass 1: Base sharp render
+    sCtx.drawImage(mainCanvas, 0, 0);
+
+    // Pass 2: Dual-stage GPU Bloom (gives rich neon glow)
+    bCtx1.drawImage(mainCanvas, 0, 0, bloom1.width, bloom1.height);
+    bCtx2.drawImage(bloom1, 0, 0, bloom2.width, bloom2.height);
+
+    sCtx.save();
+    sCtx.globalCompositeOperation = 'lighter';
+    sCtx.globalAlpha = isClimax ? 0.38 + beatKick * 0.10 : 0.28;
+    sCtx.drawImage(bloom1, 0, 0, W, H);
+    sCtx.globalAlpha = isClimax ? 0.34 : 0.22;
+    sCtx.drawImage(bloom2, 0, 0, W, H);
+    sCtx.restore();
+
+    // Pass 3: Horizontal Cyberpunk Glitch Slices during Drop, Micro-glitches & Outro
+    const glitchIntensity =
+      (t > 0.39 && t < 0.46) ? 1.0 :
+      (t > 0.645 && t < 0.67) ? 0.55 :
+      (t > 0.885 && t < 0.965) ? 0.95 : 0;
+
+    if (glitchIntensity > 0) {
+      const gStep = Math.floor(t * 75);
+      const sliceCount = Math.floor(6 + glitchIntensity * 10);
+      sCtx.save();
+      for (let s = 0; s < sliceCount; s++) {
+        const sy = Math.floor(hash(gStep * 17.3 + s * 5.1) * (H - 90));
+        const sh = Math.floor(8 + hash(gStep * 9.7 + s * 13.3) * 68);
+        const shift = (hash(gStep * 31.1 + s * 7.9) - 0.5) * 130 * glitchIntensity;
+        sCtx.drawImage(mainCanvas, 0, sy, W, sh, shift, sy, W, sh);
+
+        // Occasional neon cyan/magenta glitch bar accent
+        if (hash(gStep + s * 19.9) > 0.78) {
+          sCtx.fillStyle = s % 2 === 0
+            ? 'rgba(0, 243, 255, 0.28)'
+            : 'rgba(255, 0, 128, 0.28)';
+          sCtx.fillRect(0, sy, W, Math.min(sh, 10));
+        }
+      }
+      sCtx.restore();
+    }
+
+    // Pass 4: Crisp Scanlines, Film Grain & Edge Vignette
+    sCtx.save();
+    // Subtle CRT scanlines
+    sCtx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+    for (let y = 0; y < H; y += 6) {
+      sCtx.fillRect(0, y, W, 2);
+    }
+
+    // Animated grain overlay
+    const ox = Math.floor(hash(Math.floor(t * 60)) * 120);
+    const oy = Math.floor(hash(Math.floor(t * 60) + 99) * 120);
+    const pat = sCtx.createPattern(noiseCanvas, 'repeat');
+    sCtx.translate(ox, oy);
+    sCtx.fillStyle = pat;
+    sCtx.fillRect(-ox, -oy, W, H);
+    sCtx.translate(-ox, -oy);
+
+    // Cinematic Vignette
+    const vig = sCtx.createRadialGradient(CX, CY, 460, CX, CY, 1140);
+    vig.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vig.addColorStop(1, 'rgba(1, 1, 5, 0.68)');
+    sCtx.fillStyle = vig;
+    sCtx.fillRect(0, 0, W, H);
+    sCtx.restore();
+
+    // Update ambient background glow for widescreen browsers
+    aCtx.drawImage(bloom2, 0, 0, ambientCanvas.width, ambientCanvas.height);
+  }
+
+  const startTime = performance.now();
+  function loop(now) {
+    const elapsed = (now - startTime) % DURATION;
+    const t = elapsed / DURATION;
+    renderScene(t);
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

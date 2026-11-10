@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>AI Native Сямыч — Intro</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #020309;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 50% 45%, #09101d 0%, #03050b 45%, #010207 100%);
+    }
+    #stage {
+      position: relative;
+      width: min(100vw, 56.25vh);
+      height: min(100vh, 177.7777778vw);
+      overflow: hidden;
+      background: #03050c;
+      box-shadow:
+        0 0 0 1px rgba(95, 218, 255, .04),
+        0 0 120px rgba(0, 178, 255, .07),
+        0 0 220px #000;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <main id="stage">
+    <canvas id="scene" width="1080" height="1920" aria-label="Анимированная заставка канала AI Native Сямыч"></canvas>
+  </main>
+
+  <script>
+  (() => {
+    'use strict';
+
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const W = 1080;
+    const H = 1920;
+    const CX = 540;
+    const CY = 790;
+    const TITLE_Y = 918;
+    const TAU = Math.PI * 2;
+    const DURATION = 5000;
+
+    let seed = 0x5a17c9;
+    function rnd() {
+      seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+      return (seed >>> 0) / 4294967296;
+    }
+
+    function hash(n) {
+      const x = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
+      return x - Math.floor(x);
+    }
+
+    function clamp(v, a = 0, b = 1) {
+      return Math.max(a, Math.min(b, v));
+    }
+
+    function smooth(a, b, v) {
+      const x = clamp((v - a) / (b - a));
+      return x * x * (3 - 2 * x);
+    }
+
+    function easeOutCubic(x) {
+      return 1 - Math.pow(1 - clamp(x), 3);
+    }
+
+    function pulseWindow(t, a, b) {
+      return smooth(a, a + 0.012, t) * (1 - smooth(b - 0.012, b, t));
+    }
+
+    const dust = Array.from({ length: 90 }, () => ({
+      x: rnd() * W,
+      y: rnd() * H,
+      size: 0.6 + rnd() * 2.2,
+      speed: 8 + rnd() * 28,
+      drift: rnd() * TAU,
+      alpha: 0.15 + rnd() * 0.65,
+      tint: rnd() > 0.8
+    }));
+
+    const nodes = Array.from({ length: 46 }, (_, i) => ({
+      a: rnd() * TAU,
+      r: 135 + rnd() * 440,
+      speed: (rnd() - 0.5) * 0.24,
+      squash: 0.82 + rnd() * 0.42,
+      size: 1.2 + rnd() * 3,
+      phase: rnd() * TAU,
+      power: 0.25 + rnd() * 0.75,
+      magenta: i % 7 === 0
+    }));
+
+    const links = [];
+    for (let i = 0; i < nodes.length; i++) {
+      links.push([i, (i + 1) % nodes.length]);
+      if (i % 2 === 0) links.push([i, (i + 7) % nodes.length]);
+      if (i % 9 === 0) links.push([i, (i + 13) % nodes.length]);
+    }
+
+    const codeLines = [
+      'const future = await dream();',
+      'neural.link(0x5A17);',
+      'function build(prompt) {',
+      'return idea.compile();',
+      '<model temperature="0.9" />',
+      'git commit -m "pure vibe"',
+      'token → vector → thought',
+      'import { future } from "now";',
+      'for (idea of stream) ship(idea);',
+      'AI.native = true;',
+      'sudo make reality',
+      'latent_space.unlock();',
+      '01010111 01000001 01010110 01000101',
+      'weights.sync(∞);',
+      'export default creativity;',
+      'while(alive) { learn(); }'
+    ];
+
+    const noiseCanvas = document.createElement('canvas');
+    noiseCanvas.width = noiseCanvas.height = 128;
+    const noiseCtx = noiseCanvas.getContext('2d');
+    const noiseImage = noiseCtx.createImageData(128, 128);
+    for (let i = 0; i < noiseImage.data.length; i += 4) {
+      const v = Math.floor(rnd() * 255);
+      noiseImage.data[i] = v;
+      noiseImage.data[i + 1] = v;
+      noiseImage.data[i + 2] = v;
+      noiseImage.data[i + 3] = 38;
+    }
+    noiseCtx.putImageData(noiseImage, 0, 0);
+    const noisePattern = ctx.createPattern(noiseCanvas, 'repeat');
+
+    const scanCanvas = document.createElement('canvas');
+    scanCanvas.width = 2;
+    scanCanvas.height = 6;
+    const scanCtx = scanCanvas.getContext('2d');
+    scanCtx.fillStyle = 'rgba(0,0,0,.34)';
+    scanCtx.fillRect(0, 0, 2, 1);
+    const scanPattern = ctx.createPattern(scanCanvas, 'repeat');
+
+    function trackedWidth(text, spacing) {
+      const chars = Array.from(text);
+      let width = 0;
+      for (const ch of chars) width += ctx.measureText(ch).width;
+      return width + Math.max(0, chars.length - 1) * spacing;
+    }
+
+    function trackedText(text, x, y, spacing, stroke = false) {
+      const chars = Array.from(text);
+      let width = 0;
+      for (const ch of chars) width += ctx.measureText(ch).width;
+      width += Math.max(0, chars.length - 1) * spacing;
+
+      let px = x - width / 2;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      for (const ch of chars) {
+        if (stroke) ctx.strokeText(ch, px, y);
+        else ctx.fillText(ch, px, y);
+        px += ctx.measureText(ch).width + spacing;
+      }
+    }
+
+    const TITLE = 'СЯМЫЧ';
+    const TITLE_TRACKING = 10;
+    const titleFont = size =>
+      `900 ${size}px "Arial Black", Arial, Helvetica, sans-serif`;
+
+    let titleSize = 218;
+    ctx.font = titleFont(titleSize);
+    const initialTitleWidth = trackedWidth(TITLE, TITLE_TRACKING);
+    if (initialTitleWidth > 930) {
+      titleSize *= 930 / initialTitleWidth;
+    }
+    const TITLE_FONT = titleFont(titleSize);
+
+    function drawBackground(t) {
+      const charge = smooth(1.3, 2.5, t);
+
+      const base = ctx.createRadialGradient(CX, 800, 0, CX, 900, 1180);
+      base.addColorStop(0, `rgba(19,29,62,${0.72 + charge * 0.12})`);
+      base.addColorStop(0.38, '#080d1c');
+      base.addColorStop(0.75, '#040710');
+      base.addColorStop(1, '#02040a');
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      let aura = ctx.createRadialGradient(150, 590, 0, 150, 590, 600);
+      aura.addColorStop(0, `rgba(0,185,255,${0.075 + charge * 0.035})`);
+      aura.addColorStop(0.48, 'rgba(0,98,190,.025)');
+      aura.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = aura;
+      ctx.fillRect(0, 0, W, 1250);
+
+      aura = ctx.createRadialGradient(940, 820, 0, 940, 820, 660);
+      aura.addColorStop(0, `rgba(211,37,255,${0.055 + charge * 0.04})`);
+      aura.addColorStop(0.5, 'rgba(98,32,180,.025)');
+      aura.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = aura;
+      ctx.fillRect(250, 100, 830, 1420);
+
+      aura = ctx.createRadialGradient(CX, 1440, 0, CX, 1440, 650);
+      aura.addColorStop(0, 'rgba(30,75,170,.045)');
+      aura.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = aura;
+      ctx.fillRect(0, 850, W, 1070);
+      ctx.restore();
+
+      ctx.save();
+      ctx.lineWidth = 1;
+
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(103,145,201,.025)';
+      for (let x = 0; x <= W; x += 90) {
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, H);
+      }
+      for (let y = 0; y <= 960; y += 90) {
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(W, y + 0.5);
+      }
+      ctx.stroke();
+
+      const horizon = 960;
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(54,159,225,${0.07 + charge * 0.025})`;
+      for (let x = -1440; x <= 2520; x += 180) {
+        ctx.moveTo(CX, horizon);
+        ctx.lineTo(x, H);
+      }
+
+      for (let i = 0; i < 22; i++) {
+        const p = (i / 22 + t * 0.055) % 1;
+        const y = horizon + p * p * (H - horizon);
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+      }
+      ctx.stroke();
+
+      const horizonGlow = ctx.createLinearGradient(0, 0, W, 0);
+      horizonGlow.addColorStop(0, 'rgba(0,220,255,0)');
+      horizonGlow.addColorStop(0.5, 'rgba(77,178,255,.18)');
+      horizonGlow.addColorStop(1, 'rgba(203,50,255,0)');
+      ctx.fillStyle = horizonGlow;
+      ctx.fillRect(0, horizon, W, 1);
+      ctx.restore();
+    }
+
+    function drawCode(t) {
+      const visibility =
+        (0.35 + 0.65 * smooth(0.08, 0.75, t)) *
+        (1 - 0.8 * smooth(2.52, 3.12, t));
+
+      ctx.save();
+      ctx.font = '19px "Courier New", monospace';
+      ctx.textBaseline = 'middle';
+
+      for (let i = 0; i < 16; i++) {
+        const right = i % 2 === 1;
+        const y = 175 + ((i * 149 + t * (22 + (i % 4) * 5)) % 1510);
+        const x = right ? 1008 : 72;
+        const flicker = 0.78 + Math.sin(t * 2.1 + i * 1.7) * 0.22;
+
+        ctx.textAlign = right ? 'right' : 'left';
+        ctx.globalAlpha = visibility * flicker * (0.15 + (i % 3) * 0.025);
+        ctx.fillStyle = i % 6 === 0 ? '#e65bde' : '#61c9e8';
+
+        const prefix = right ? '' : String(i + 1).padStart(2, '0') + '  ';
+        const suffix = right ? '  ' + String(i + 1).padStart(2, '0') : '';
+        ctx.fillText(prefix + codeLines[i % codeLines.length] + suffix, x, y);
+      }
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const p of dust) {
+        const y = ((p.y - t * p.speed) % H + H) % H;
+        const x = p.x + Math.sin(t * 0.65 + p.drift) * 18;
+        const twinkle = 0.55 + 0.45 * Math.sin(t * 2.4 + p.drift);
+        ctx.globalAlpha = p.alpha * twinkle * 0.34;
+        ctx.fillStyle = p.tint ? '#ff65dc' : '#8cecff';
+        ctx.fillRect(x, y, p.size, p.size * 2.4);
+      }
+      ctx.restore();
+    }
+
+    function networkPositions(t, collapse) {
+      return nodes.map(n => {
+        const angle = n.a + t * n.speed;
+        const pulse = Math.sin(t * 1.7 + n.phase) * 8;
+        const radius = (n.r + pulse) * (1 - collapse * 0.75);
+        return {
+          x: CX + Math.cos(angle) * radius,
+          y: CY + Math.sin(angle) * radius * n.squash
+        };
+      });
+    }
+
+    function drawNetwork(t) {
+      const visibility =
+        smooth(0.22, 0.82, t) *
+        (1 - smooth(2.53, 3.06, t));
+
+      if (visibility < 0.001) return;
+
+      const collapse = smooth(1.52, 2.5, t);
+      const positions = networkPositions(t, collapse);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      const linkGradient = ctx.createLinearGradient(80, 200, 1000, 1420);
+      linkGradient.addColorStop(0, '#1fd9ff');
+      linkGradient.addColorStop(0.52, '#657aff');
+      linkGradient.addColorStop(1, '#ee48d7');
+
+      ctx.beginPath();
+      for (const [a, b] of links) {
+        ctx.moveTo(positions[a].x, positions[a].y);
+        ctx.lineTo(positions[b].x, positions[b].y);
+      }
+      ctx.strokeStyle = linkGradient;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = visibility * (0.18 - collapse * 0.055);
+      ctx.stroke();
+
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const p = positions[i];
+        const beat = 0.72 + Math.sin(t * 3 + n.phase) * 0.28;
+
+        ctx.globalAlpha = visibility * n.power * beat * 0.72;
+        ctx.fillStyle = n.magenta ? '#ff5cda' : '#79edff';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, n.size * (1 + collapse * 0.45), 0, TAU);
+        ctx.fill();
+
+        if (i % 8 === 0) {
+          ctx.globalAlpha = visibility * 0.3;
+          ctx.strokeStyle = n.magenta ? '#ff63de' : '#62dfff';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 10 + beat * 4, 0, TAU);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(p.x - 15, p.y);
+          ctx.lineTo(p.x + 15, p.y);
+          ctx.moveTo(p.x, p.y - 15);
+          ctx.lineTo(p.x, p.y + 15);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
+    function drawEnergy(t) {
+      const energy =
+        smooth(1.25, 2.25, t) *
+        (1 - smooth(2.52, 2.84, t));
+
+      if (energy < 0.001) return;
+
+      const charge = smooth(1.4, 2.52, t);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'round';
+
+      for (let i = 0; i < 30; i++) {
+        const angle = hash(i * 9.13) * TAU + Math.sin(t * 0.28 + i) * 0.055;
+        const outer = 300 + hash(i * 4.7 + 2) * 430;
+        const travel = (t * (0.42 + hash(i + 20) * 0.35) + hash(i + 80)) % 1;
+        const radius = outer - travel * (100 + charge * 150);
+        const length = 28 + hash(i + 40) * (65 + charge * 90);
+        const inner = Math.max(90, radius - length);
+        const squash = 0.92;
+
+        ctx.beginPath();
+        ctx.moveTo(
+          CX + Math.cos(angle) * radius,
+          CY + Math.sin(angle) * radius * squash
+        );
+        ctx.lineTo(
+          CX + Math.cos(angle) * inner,
+          CY + Math.sin(angle) * inner * squash
+        );
+        ctx.strokeStyle = i % 6 === 0 ? '#ff4bd8' : '#4de8ff';
+        ctx.lineWidth = 0.7 + hash(i + 5) * 2;
+        ctx.globalAlpha = energy * (0.08 + hash(i + 11) * 0.25);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawCore(t) {
+      const visibility =
+        smooth(0.52, 1.14, t) *
+        (1 - smooth(2.38, 2.7, t));
+
+      if (visibility < 0.001) return;
+
+      const charge = smooth(1.42, 2.5, t);
+      const collapse = smooth(1.76, 2.53, t);
+      const scale = 1 - collapse * 0.69;
+
+      ctx.save();
+      ctx.translate(CX, CY);
+      ctx.scale(scale, scale);
+      ctx.globalCompositeOperation = 'lighter';
+
+      const orb = ctx.createRadialGradient(0, 0, 0, 0, 0, 145);
+      orb.addColorStop(0, 'rgba(225,255,255,.9)');
+      orb.addColorStop(0.1, 'rgba(75,235,255,.7)');
+      orb.addColorStop(0.32, 'rgba(48,119,255,.3)');
+      orb.addColorStop(0.62, 'rgba(151,47,255,.12)');
+      orb.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = visibility * (0.42 + charge * 0.52);
+      ctx.fillStyle = orb;
+      ctx.beginPath();
+      ctx.arc(0, 0, 145 + charge * 25, 0, TAU);
+      ctx.fill();
+
+      ctx.save();
+      ctx.rotate(t * 0.18);
+      ctx.setLineDash([3, 18]);
+      ctx.lineDashOffset = -t * 38;
+      ctx.strokeStyle = '#55e9ff';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = visibility * 0.64;
+      ctx.beginPath();
+      ctx.arc(0, 0, 245, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.rotate(-t * 0.24);
+      ctx.setLineDash([72, 20, 8, 20]);
+      ctx.lineDashOffset = t * 26;
+      ctx.strokeStyle = '#b45cff';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = visibility * 0.56;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 208, 132, 0, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.rotate(t * 0.31);
+      ctx.setLineDash([1, 12]);
+      ctx.strokeStyle = '#d8fbff';
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = visibility * 0.42;
+      ctx.beginPath();
+      ctx.arc(0, 0, 116, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.rotate(-t * 0.09);
+      ctx.strokeStyle = '#4acff5';
+      ctx.lineWidth = 1.4;
+      ctx.globalAlpha = visibility * 0.35;
+      ctx.setLineDash([88, 25]);
+      ctx.beginPath();
+      for (let i = 0; i <= 6; i++) {
+        const a = i * TAU / 6 - Math.PI / 2;
+        const x = Math.cos(a) * 282;
+        const y = Math.sin(a) * 282;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.rotate(t * 0.065);
+      ctx.beginPath();
+      for (let i = 0; i < 48; i++) {
+        const a = i * TAU / 48;
+        const r1 = 290;
+        const r2 = r1 + (i % 4 === 0 ? 17 : 8);
+        ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+        ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+      }
+      ctx.strokeStyle = '#8adff5';
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = visibility * 0.28;
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.rotate(-t * 0.36);
+      ctx.strokeStyle = '#72efff';
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = visibility * 0.72;
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const a = i * TAU / 4;
+        ctx.arc(0, 0, 162, a + 0.12, a + 1.08);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.font = '700 62px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#e9feff';
+      ctx.shadowColor = '#31ddff';
+      ctx.shadowBlur = 22;
+      ctx.globalAlpha = visibility * (0.9 - charge * 0.55);
+      ctx.fillText('</>', 0, 4);
+      ctx.restore();
+
+      ctx.save();
+      ctx.font = '17px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#78c7dc';
+      ctx.globalAlpha = visibility * (1 - collapse) * 0.58;
+      ctx.fillText('NEURAL CORE  //  0x5A17', CX, CY + 352);
+      ctx.restore();
+    }
+
+    function drawBurst(t) {
+      const flash = Math.exp(-Math.pow((t - 2.53) / 0.085, 2));
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      if (flash > 0.001) {
+        const glow = ctx.createRadialGradient(CX, CY, 0, CX, CY, 760);
+        glow.addColorStop(0, 'rgba(225,255,255,.95)');
+        glow.addColorStop(0.08, 'rgba(75,230,255,.58)');
+        glow.addColorStop(0.3, 'rgba(71,104,255,.2)');
+        glow.addColorStop(0.58, 'rgba(213,48,255,.08)');
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = flash;
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.globalAlpha = flash * 0.07;
+        ctx.fillStyle = '#c8f8ff';
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      for (let j = 0; j < 3; j++) {
+        const p = (t - (2.47 + j * 0.07)) / 0.74;
+        if (p <= 0 || p >= 1) continue;
+
+        ctx.globalAlpha = Math.pow(1 - p, 2) * 0.6;
+        ctx.strokeStyle = j === 1 ? '#ec55e8' : '#6beeff';
+        ctx.lineWidth = 0.8 + (1 - p) * 3;
+        ctx.beginPath();
+        ctx.ellipse(CX, CY, p * 920, p * 730, 0, 0, TAU);
+        ctx.stroke();
+      }
+
+      const p = clamp((t - 2.48) / 0.68);
+      if (t >= 2.48 && p < 1) {
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 42; i++) {
+          const angle = hash(i * 3.71) * TAU;
+          const distance = 35 + p * (170 + hash(i + 18) * 790);
+          const length = 25 + (1 - p) * (45 + hash(i + 31) * 130);
+          const squash = 0.9;
+
+          ctx.beginPath();
+          ctx.moveTo(
+            CX + Math.cos(angle) * distance,
+            CY + Math.sin(angle) * distance * squash
+          );
+          ctx.lineTo(
+            CX + Math.cos(angle) * (distance + length),
+            CY + Math.sin(angle) * (distance + length) * squash
+          );
+          ctx.strokeStyle = i % 5 === 0 ? '#ff50d8' : '#8cf4ff';
+          ctx.lineWidth = 0.7 + hash(i + 50) * 2.2;
+          ctx.globalAlpha = Math.pow(1 - p, 2) * (0.15 + hash(i) * 0.45);
+          ctx.stroke();
+        }
+      }
+
+      const lineAlpha =
+        smooth(2.43, 2.53, t) *
+        (1 - smooth(2.57, 2.88, t));
+
+      if (lineAlpha > 0) {
+        const line = ctx.createLinearGradient(50, 0, 1030, 0);
+        line.addColorStop(0, 'rgba(0,220,255,0)');
+        line.addColorStop(0.28, '#38dfff');
+        line.addColorStop(0.5, '#ffffff');
+        line.addColorStop(0.72, '#f74bdc');
+        line.addColorStop(1, 'rgba(255,50,220,0)');
+        ctx.fillStyle = line;
+        ctx.globalAlpha = lineAlpha;
+        ctx.fillRect(40, TITLE_Y - 1, 1000, 2 + flash * 5);
+      }
+      ctx.restore();
+    }
+
+    function drawTitle(t) {
+      const reveal = smooth(2.48, 2.77, t);
+      const out = 1 - smooth(4.46, 4.78, t);
+      const alpha = reveal * out;
+      if (alpha < 0.001) return;
+
+      const subtitleAlpha =
+        smooth(2.77, 3.07, t) *
+        (1 - smooth(4.39, 4.67, t));
+
+      const descriptorAlpha =
+        smooth(3.02, 3.28, t) *
+        (1 - smooth(4.35, 4.59, t));
+
+      const introProgress = clamp((t - 2.48) / 0.45);
+      const revealClip = easeOutCubic((t - 2.48) / 0.34);
+      const scale = 1.24 - easeOutCubic(introProgress) * 0.24;
+
+      const glitch = Math.max(
+        (1 - smooth(2.64, 2.92, t)) * 0.82,
+        pulseWindow(t, 3.31, 3.365) * 0.64,
+        pulseWindow(t, 4.12, 4.18) * 0.54,
+        smooth(4.43, 4.64, t) * 0.95
+      );
+
+      const tick = Math.floor(t * 82);
+      const jitter = (hash(tick + 41) - 0.5) * glitch * 11;
+      const split = 1.6 + glitch * (12 + hash(tick + 8) * 15);
+
+      ctx.save();
+      const backdrop = ctx.createRadialGradient(CX, 940, 30, CX, 940, 610);
+      backdrop.addColorStop(0, `rgba(2,5,15,${0.84 * alpha})`);
+      backdrop.addColorStop(0.45, `rgba(3,6,17,${0.56 * alpha})`);
+      backdrop.addColorStop(1, 'rgba(2,4,12,0)');
+      ctx.fillStyle = backdrop;
+      ctx.fillRect(20, 410, 1040, 980);
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.22;
+      ctx.strokeStyle = '#69dff7';
+      ctx.lineWidth = 1.2;
+      const left = 100;
+      const right = 980;
+      const top = 742;
+      const bottom = 1214;
+      const corner = 48;
+      ctx.beginPath();
+      ctx.moveTo(left, top + corner);
+      ctx.lineTo(left, top);
+      ctx.lineTo(left + corner, top);
+      ctx.moveTo(right - corner, top);
+      ctx.lineTo(right, top);
+      ctx.lineTo(right, top + corner);
+      ctx.moveTo(left, bottom - corner);
+      ctx.lineTo(left, bottom);
+      ctx.lineTo(left + corner, bottom);
+      ctx.moveTo(right - corner, bottom);
+      ctx.lineTo(right, bottom);
+      ctx.lineTo(right, bottom - corner);
+      ctx.stroke();
+
+      const rearLine = ctx.createLinearGradient(140, 0, 940, 0);
+      rearLine.addColorStop(0, 'rgba(0,220,255,0)');
+      rearLine.addColorStop(0.5, 'rgba(85,220,255,.55)');
+      rearLine.addColorStop(1, 'rgba(244,60,218,0)');
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = alpha * 0.22;
+      ctx.fillStyle = rearLine;
+      ctx.fillRect(130, TITLE_Y, 820, 1);
+      ctx.restore();
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(
+        CX - 500 * revealClip,
+        TITLE_Y - 155,
+        1000 * revealClip,
+        310
+      );
+      ctx.clip();
+      ctx.translate(CX + jitter, TITLE_Y);
+      ctx.scale(scale, scale);
+      ctx.font = TITLE_FONT;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+
+      ctx.globalAlpha = alpha * (0.17 + glitch * 0.32);
+      ctx.fillStyle = '#00e9ff';
+      ctx.shadowColor = '#00d9ff';
+      ctx.shadowBlur = 34 + glitch * 28;
+      trackedText(TITLE, -split, 0, TITLE_TRACKING);
+
+      ctx.fillStyle = '#ff37ce';
+      ctx.shadowColor = '#ff37ce';
+      trackedText(TITLE, split, 0, TITLE_TRACKING);
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.shadowColor = 'rgba(47,222,255,.68)';
+      ctx.shadowBlur = 22;
+
+      const titleGradient = ctx.createLinearGradient(0, -120, 0, 120);
+      titleGradient.addColorStop(0, '#ffffff');
+      titleGradient.addColorStop(0.43, '#effeff');
+      titleGradient.addColorStop(0.72, '#c4edf4');
+      titleGradient.addColorStop(1, '#83b8ca');
+      ctx.fillStyle = titleGradient;
+      trackedText(TITLE, 0, 0, TITLE_TRACKING);
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,255,255,.52)';
+      ctx.lineWidth = 1.15;
+      trackedText(TITLE, 0, 0, TITLE_TRACKING, true);
+      ctx.restore();
+
+      const shine = (t - 2.96) / 1.18;
+      if (shine > 0 && shine < 1) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(-500, -135 + shine * 270, 1000, 19);
+        ctx.clip();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = alpha * Math.sin(shine * Math.PI) * 0.48;
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = '#a8f7ff';
+        ctx.shadowBlur = 16;
+        trackedText(TITLE, 0, 0, TITLE_TRACKING);
+        ctx.restore();
+      }
+
+      if (glitch > 0.045) {
+        for (let i = 0; i < 7; i++) {
+          const y = -112 + hash(tick * 2.7 + i * 11) * 224;
+          const height = 2 + hash(tick + i * 17) * 14;
+          const dx = (hash(tick * 4.1 + i * 5) - 0.5) * 78 * glitch;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(-520, y, 1040, height);
+          ctx.clip();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = alpha * glitch * 0.58;
+          ctx.fillStyle = i % 2 ? '#ff54da' : '#8bf5ff';
+          ctx.shadowBlur = 0;
+          trackedText(TITLE, dx, 0, TITLE_TRACKING);
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+
+      if (glitch > 0.12) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 8; i++) {
+          const y = TITLE_Y - 120 + hash(tick + i * 31) * 245;
+          const x = 80 + hash(tick * 1.9 + i * 7) * 800;
+          const width = 25 + hash(tick + i * 13) * 170;
+          ctx.globalAlpha = alpha * glitch * (0.1 + hash(i + tick) * 0.2);
+          ctx.fillStyle = i % 3 === 0 ? '#ff42d4' : '#51e9ff';
+          ctx.fillRect(x, y, width, 1 + hash(i * 9 + tick) * 5);
+        }
+        ctx.restore();
+      }
+
+      if (subtitleAlpha > 0.001) {
+        ctx.save();
+        ctx.translate(0, (1 - subtitleAlpha) * 19);
+        ctx.font = '500 54px Arial, Helvetica, sans-serif';
+        const subtitleWidth = trackedWidth('AI Native', 11);
+
+        ctx.globalAlpha = subtitleAlpha;
+        ctx.fillStyle = '#d9fbff';
+        ctx.shadowColor = '#27dfff';
+        ctx.shadowBlur = 16;
+        trackedText('AI Native', CX, 1074, 11);
+        ctx.shadowBlur = 0;
+
+        const leftEnd = CX - subtitleWidth / 2 - 34;
+        const rightStart = CX + subtitleWidth / 2 + 34;
+        const lineGradient = ctx.createLinearGradient(
+          leftEnd - 100, 0, rightStart + 100, 0
+        );
+        lineGradient.addColorStop(0, 'rgba(61,224,255,0)');
+        lineGradient.addColorStop(0.25, 'rgba(61,224,255,.7)');
+        lineGradient.addColorStop(0.75, 'rgba(232,76,220,.7)');
+        lineGradient.addColorStop(1, 'rgba(232,76,220,0)');
+
+        ctx.strokeStyle = lineGradient;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = subtitleAlpha * 0.62;
+        ctx.beginPath();
+        ctx.moveTo(leftEnd - 92, 1074);
+        ctx.lineTo(leftEnd, 1074);
+        ctx.moveTo(rightStart, 1074);
+        ctx.lineTo(rightStart + 92, 1074);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      if (descriptorAlpha > 0.001) {
+        ctx.save();
+        ctx.font = '20px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#9bb9cb';
+        ctx.globalAlpha = descriptorAlpha * 0.72;
+        ctx.fillText('ВАЙБКОДИНГ  •  НЕЙРОСЕТИ  •  КОД', CX, 1155);
+        ctx.restore();
+      }
+    }
+
+    function drawHUD(t) {
+      const visibility =
+        smooth(0.14, 0.55, t) *
+        (1 - smooth(4.55, 4.85, t));
+
+      const progress = smooth(0.25, 2.35, t);
+
+      ctx.save();
+      ctx.font = '17px "Courier New", monospace';
+      ctx.textBaseline = 'middle';
+      ctx.globalAlpha = visibility * 0.55;
+
+      const topLine = ctx.createLinearGradient(80, 0, 1000, 0);
+      topLine.addColorStop(0, 'rgba(72,225,255,.75)');
+      topLine.addColorStop(0.45, 'rgba(72,155,210,.13)');
+      topLine.addColorStop(1, 'rgba(232,71,218,.55)');
+      ctx.fillStyle = topLine;
+      ctx.fillRect(80, 124, 920, 1);
+
+      ctx.fillStyle = '#8fd8e8';
+      ctx.textAlign = 'left';
+      ctx.fillText(
+        t < 2.5 ? 'NEURAL_BOOT // 0x5A17' : 'AI_NATIVE // SIGNAL LOCKED',
+        82,
+        94
+      );
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = t < 2.5 ? '#b18ad8' : '#7ce9f7';
+      ctx.fillText(
+        t < 2.5
+          ? String(Math.round(progress * 100)).padStart(3, '0') + '%'
+          : 'CH. 001',
+        998,
+        94
+      );
+
+      ctx.globalAlpha = visibility * 0.3;
+      ctx.fillStyle = '#63ddef';
+      ctx.fillRect(80, 116, 4, 16);
+      ctx.fillStyle = '#e35bd4';
+      ctx.fillRect(996, 116, 4, 16);
+
+      ctx.globalAlpha = visibility * 0.34;
+      const bottomLine = ctx.createLinearGradient(80, 0, 1000, 0);
+      bottomLine.addColorStop(0, 'rgba(63,206,241,0)');
+      bottomLine.addColorStop(0.5, 'rgba(93,153,190,.5)');
+      bottomLine.addColorStop(1, 'rgba(226,72,213,0)');
+      ctx.fillStyle = bottomLine;
+      ctx.fillRect(80, 1790, 920, 1);
+
+      ctx.font = '16px "Courier New", monospace';
+      ctx.fillStyle = '#7898ad';
+      ctx.textAlign = 'left';
+      ctx.fillText('1080 × 1920  /  09:16', 82, 1825);
+      ctx.textAlign = 'right';
+      ctx.fillText('LOOP // 05.00 SEC', 998, 1825);
+      ctx.restore();
+
+      const bootVisibility =
+        smooth(0.24, 0.46, t) *
+        (1 - smooth(2.12, 2.43, t));
+
+      if (bootVisibility > 0.001) {
+        let message;
+        let start;
+        if (t < 0.9) {
+          message = 'INITIALIZING NEURAL SPACE';
+          start = 0.28;
+        } else if (t < 1.58) {
+          message = 'INJECTING VIBE_CODE';
+          start = 0.9;
+        } else {
+          message = 'NEURAL CORE ONLINE';
+          start = 1.58;
+        }
+
+        const count = Math.max(
+          0,
+          Math.min(message.length, Math.ceil((t - start) / 0.3 * message.length))
+        );
+        const cursor = Math.floor(t * 5) % 2 ? '  ▋' : '';
+
+        ctx.save();
+        ctx.font = '19px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = bootVisibility * 0.72;
+        ctx.fillStyle = '#8adceb';
+        ctx.fillText('> ' + message.slice(0, count) + cursor, CX, 1302);
+
+        ctx.globalAlpha = bootVisibility * 0.24;
+        ctx.fillStyle = '#28465c';
+        ctx.fillRect(340, 1337, 400, 2);
+
+        const bar = ctx.createLinearGradient(340, 0, 740, 0);
+        bar.addColorStop(0, '#39dffb');
+        bar.addColorStop(0.7, '#787cff');
+        bar.addColorStop(1, '#ee50d7');
+        ctx.globalAlpha = bootVisibility * 0.82;
+        ctx.fillStyle = bar;
+        ctx.fillRect(340, 1337, 400 * progress, 2);
+        ctx.restore();
+      }
+    }
+
+    function drawOverlay(t) {
+      ctx.save();
+      const vignette = ctx.createRadialGradient(CX, 900, 280, CX, 960, 1160);
+      vignette.addColorStop(0, 'rgba(0,0,0,0)');
+      vignette.addColorStop(0.64, 'rgba(0,0,0,.12)');
+      vignette.addColorStop(0.84, 'rgba(0,0,0,.48)');
+      vignette.addColorStop(1, 'rgba(0,0,0,.88)');
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, W, H);
+
+      const topBottom = ctx.createLinearGradient(0, 0, 0, H);
+      topBottom.addColorStop(0, 'rgba(0,0,0,.48)');
+      topBottom.addColorStop(0.12, 'rgba(0,0,0,0)');
+      topBottom.addColorStop(0.84, 'rgba(0,0,0,0)');
+      topBottom.addColorStop(1, 'rgba(0,0,0,.58)');
+      ctx.fillStyle = topBottom;
+      ctx.fillRect(0, 0, W, H);
+
+      const scanY = ((t * 285) % (H + 400)) - 200;
+      const scanGlow = ctx.createLinearGradient(0, scanY - 100, 0, scanY + 100);
+      scanGlow.addColorStop(0, 'rgba(90,220,255,0)');
+      scanGlow.addColorStop(0.5, 'rgba(90,220,255,.035)');
+      scanGlow.addColorStop(1, 'rgba(90,220,255,0)');
+      ctx.fillStyle = scanGlow;
+      ctx.fillRect(0, scanY - 100, W, 200);
+
+      ctx.globalAlpha = 0.34;
+      ctx.fillStyle = scanPattern;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.1;
+      ctx.fillStyle = noisePattern;
+      ctx.translate(
+        Math.floor(hash(Math.floor(t * 24)) * 3) - 1,
+        Math.floor(hash(Math.floor(t * 24) + 9) * 3) - 1
+      );
+      ctx.fillRect(-4, -4, W + 8, H + 8);
+      ctx.restore();
+    }
+
+    function render(t) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.shadowBlur = 0;
+      ctx.setLineDash([]);
+
+      const master =
+        smooth(0, 0.22, t) *
+        (1 - smooth(4.64, 4.98, t));
+
+      ctx.fillStyle = '#03050c';
+      ctx.fillRect(0, 0, W, H);
+
+      drawBackground(t);
+      drawCode(t);
+      drawNetwork(t);
+      drawEnergy(t);
+      drawCore(t);
+      drawBurst(t);
+      drawTitle(t);
+      drawHUD(t);
+      drawOverlay(t);
+
+      if (master < 0.9999) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = `rgba(2,3,9,${1 - master})`;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+    }
+
+    const start = performance.now();
+
+    function frame(now) {
+      const t = ((now - start) % DURATION) / 1000;
+      render(t);
+      requestAnimationFrame(frame);
+    }
+
+    requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>

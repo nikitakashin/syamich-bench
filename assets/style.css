@@ -110,6 +110,9 @@ tbody[data-rank="1"] .meter i { background: var(--yellow); }
 .grades dt { font-size: 12px; color: var(--muted); }
 .grades dd { margin: 4px 0 0; font-size: 16px; }
 .detail p { margin-top: 12px; font: 14px/1.55 var(--body); color: var(--muted); }
+.work-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.work-links a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 7px 12px; border: 1px solid #355863; border-radius: 4px; color: var(--cyan); font: 13px/1.4 var(--mono); }
+.work-links a:hover, .work-links a:focus-visible { background: #0c2831; border-color: var(--cyan); }
 .panel-note, .price-note { font: 12px/1.55 var(--mono); }
 .panel-note { padding: 9px 20px; }
 .panel-note span { margin-right: 4px; color: var(--cyan); }

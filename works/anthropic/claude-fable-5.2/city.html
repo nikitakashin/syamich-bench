@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEON DISTRICT — ночной киберпанк-город</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000}
+  canvas{display:block;position:fixed;left:0;top:0}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+
+/* ───────────────────────── utils ───────────────────────── */
+let _seed = 20771;
+function rnd(){ _seed = (_seed + 0x6D2B79F5) | 0; let t = Math.imul(_seed ^ (_seed >>> 15), 1 | _seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
+const rr = (a,b)=> a + (b-a)*rnd();
+
+const P = 38, BLOCK = 28, NC = 11, R = 112, AVE = 11, N_LAMPS = 52;
+const NEON = [[1.0,0.08,0.55],[0.05,0.85,1.0],[1.0,0.42,0.06],[0.55,0.18,1.0],[0.1,1.0,0.55],[1.0,0.1,0.15],[1.0,0.85,0.2]];
+function pickNeon(){ const r=rnd(); if(r<0.32) return NEON[0]; if(r<0.64) return NEON[1]; return NEON[2+Math.floor(rnd()*5)]; }
+
+/* ───────────────────────── renderer ───────────────────────── */
+const renderer = new THREE.WebGLRenderer({antialias:false, powerPreference:'high-performance', depth:false, stencil:false});
+renderer.autoClear = false;
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.setClearColor(0x000000,1);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(58, 1, 1, 4000);
+const mirrorCam = new THREE.PerspectiveCamera(58, 1, 1, 4000);
+
+const uTime = { value: 0 };
+const uPx = { value: 800 };
+const uTexMatrix = { value: new THREE.Matrix4() };
+const uRefl = { value: null };
+
+/* ───────────────────────── GLSL chunks ───────────────────────── */
+const COMMON = /* glsl */`
+uniform float uTime;
+float hash11(float p){ p = fract(p*0.1031); p *= p+33.33; p *= p+p; return fract(p); }
+float hash21(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*0.1031); p3 += dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(hash21(i),hash21(i+vec2(1.0,0.0)),f.x), mix(hash21(i+vec2(0.0,1.0)),hash21(i+vec2(1.0,1.0)),f.x), f.y); }
+float fbm(vec2 p){ float a=0.5, s=0.0; for(int i=0;i<4;i++){ s+=a*vnoise(p); p=p*2.03+17.1; a*=0.5; } return s; }
+vec3 skyBase(vec3 d){
+  float az = atan(d.z,d.x);
+  vec3 hor = mix(vec3(0.085,0.018,0.11), vec3(0.012,0.06,0.10), 0.5+0.5*sin(az*2.0+0.6));
+  hor += vec3(0.07,0.025,0.005)*pow(0.5+0.5*cos(az-2.2),6.0);
+  vec3 zen = vec3(0.003,0.005,0.013);
+  return mix(hor, zen, pow(clamp(d.y,0.0,1.0),0.42));
+}
+vec3 applyFog(vec3 col, vec3 wp){
+  vec3 v = wp - cameraPosition; float dist = length(v)+0.0001;
+  float dens = 0.0040*(0.5+0.5*exp(-max(wp.y,0.0)/80.0));
+  float f = 1.0-exp(-dist*dens);
+  vec3 fc = skyBase(normalize(vec3(v.x, dist*0.04, v.z)));
+  return mix(col, fc, f);
+}
+`;
+
+const PATH = /* glsl */`
+vec3 pathPos(vec4 A, vec4 B, float t){
+  if (B.w < 0.5){
+    float a = A.w + B.x*t;
+    return vec3(cos(a)*A.x, A.z + sin(a*B.z)*B.y, sin(a)*A.y);
+  } else {
+    float s = mod(A.w + B.x*t, 2.0*A.y) - A.y;
+    return B.y < 0.5 ? vec3(A.x, A.z, s) : vec3(s, A.z, A.x);
+  }
+}
+float pathFade(vec4 A, vec4 B, vec3 p){
+  if (B.w < 0.5) return 1.0;
+  float s = B.y < 0.5 ? p.z : p.x;
+  return 1.0 - smoothstep(A.y-70.0, A.y-5.0, abs(s));
+}
+`;
+
+/* ───────────────────────── city data ───────────────────────── */
+const bld = [], signs = [], posts = [], pts = [], cars = [];
+
+function addStaticPoint(x,y,z,color,size,blink,inten){
+  const r = Math.hypot(x,z), ang = Math.atan2(z,x);
+  pts.push({A:[r,r,y,ang], B:[0,0,0,0], color, P:[size,0,blink,inten]});
+}
+function hitsRing(cx,cz,w,d){
+  const dx = Math.max(Math.abs(cx)-w/2,0), dz = Math.max(Math.abs(cz)-d/2,0);
+  const dmin = Math.hypot(dx,dz), dmax = Math.hypot(Math.abs(cx)+w/2, Math.abs(cz)+d/2);
+  return dmin < R+AVE && dmax > R-AVE;
+}
+function pickFace(cx,cz,dist,nearAve){
+  let nx=0,nz=0;
+  if (nearAve && rnd()<0.8){
+    const s = dist<R?1:-1; const dx=s*cx/dist, dz=s*cz/dist;
+    if (Math.abs(dx)>Math.abs(dz)) nx=Math.sign(dx); else nz=Math.sign(dz);
+  } else { const f=Math.floor(rnd()*4); nx=[1,-1,0,0][f]; nz=[0,0,1,-1][f]; }
+  return [nx,nz];
+}
+function addSigns(cx,cz,w,d,h,dist,neon){
+  if (h < 14) return;
+  const nearAve = Math.abs(dist-R) < 50;
+  const count = nearAve ? 1+Math.floor(rnd()*3) : (rnd()<0.3?1:0);
+  for (let k=0;k<count;k++){
+    const [nx,nz] = pickFace(cx,cz,dist,nearAve);
+    const faceW = nx!==0 ? d : w, hd = nx!==0 ? w/2 : d/2;
+    const tx = nx!==0?0:1, tz = nx!==0?1:0;
+    const col = rnd()<0.55 ? neon : pickNeon();
+    const t = rnd(), seed = rnd();
+    if (t < 0.45){ // вертикальная вывеска-«лезвие»
+      const sw = rr(1.5,3.0);
+      let n = 3+Math.floor(rnd()*6); n = Math.max(2, Math.min(n, Math.floor((h-6)/sw)));
+      const sh = sw*n;
+      const lo = 4+sh/2, hi = Math.max(lo, Math.min(h-1,58)-sh/2);
+      const yc = rr(lo,hi);
+      const off = (rnd()-0.5)*Math.max(0,faceW-1.5);
+      const o = hd + sw/2 + 0.25;
+      signs.push({x:cx+nx*o+tx*off, y:yc, z:cz+nz*o+tz*off, ry:Math.atan2(-nz,nx), sx:sw, sy:sh, type:0, col, seed});
+    } else if (t < 0.8){ // LED-экран
+      if (faceW < 7) continue;
+      const bw = Math.min(faceW*0.85, rr(6,16)), bh = Math.min(h*0.5, bw*rr(0.5,1.1));
+      const lo = 5+bh/2, hi = Math.max(lo, Math.min(h-1,62)-bh/2);
+      const yc = rr(lo,hi);
+      const off = (rnd()-0.5)*(faceW-bw)*0.9, o = hd+0.2+rnd()*0.3;
+      signs.push({x:cx+nx*o+tx*off, y:yc, z:cz+nz*o+tz*off, ry:Math.atan2(nx,nz), sx:bw, sy:bh, type:1, col, seed});
+    } else { // горизонтальная надпись
+      const sh = rr(1.8,3.2);
+      const n = Math.max(2, Math.min(8, Math.floor(faceW*0.85/sh))), sw = sh*n;
+      if (sw > faceW) continue;
+      const yc = rr(5, Math.max(5.5, Math.min(h-2,40)));
+      const off = (rnd()-0.5)*(faceW-sw)*0.9, o = hd+0.2+rnd()*0.3;
+      signs.push({x:cx+nx*o+tx*off, y:yc, z:cz+nz*o+tz*off, ry:Math.atan2(nx,nz), sx:sw, sy:sh, type:0, col, seed});
+    }
+  }
+  if (h > 55 && rnd() < 0.55){ // логотип на вершине башни
+    const [nx,nz] = pickFace(cx,cz,dist,nearAve);
+    const faceW = nx!==0 ? d : w, hd = nx!==0 ? w/2 : d/2;
+    const s = Math.min(faceW*0.75, rr(5,11));
+    const o = hd+0.3;
+    signs.push({x:cx+nx*o, y:h-s/2-2.5, z:cz+nz*o, ry:Math.atan2(nx,nz), sx:s, sy:s, type:2, col:rnd()<0.5?neon:pickNeon(), seed:rnd()});
+  }
+}
+function addBuilding(cx,cz,w,d){
+  const dist = Math.hypot(cx,cz);
+  let h;
+  if (dist < 50) h = 150 + rnd()*150;
+  else h = (22 + Math.pow(rnd(),2)*75) * (0.6 + 1.0*Math.exp(-Math.pow(dist/180,2)));
+  h = Math.min(h, Math.min(w,d)*10);
+  const neon = pickNeon(), seed = rnd()*100, style = Math.floor(rnd()*3);
+  bld.push({x:cx,y:0,z:cz,w,h,d,seed,style,neon});
+  let top = h, tw = w, td = d;
+  if (rnd()<0.55 && Math.min(w,d)>8){
+    const s = rr(0.55,0.85), h2 = Math.min(h*rr(0.15,0.4), dist<50?70:30);
+    tw*=s; td*=s;
+    bld.push({x:cx,y:top,z:cz,w:tw,h:h2,d:td,seed:seed+1.37,style,neon}); top += h2;
+    if (rnd()<0.35){
+      const s2 = rr(0.5,0.75), h3 = Math.min(h2*rr(0.4,0.9), 20);
+      tw*=s2; td*=s2;
+      bld.push({x:cx,y:top,z:cz,w:tw,h:h3,d:td,seed:seed+2.71,style,neon}); top += h3;
+    }
+  }
+  if (top > 55 && rnd()<0.6){
+    const ah = rr(8,26);
+    posts.push({x:cx,y:top,z:cz,sx:0.35,sy:ah,sz:0.35,ry:0});
+    addStaticPoint(cx, top+ah+0.3, cz, [1.0,0.1,0.07], 4.0, rr(0.35,0.8), 3.0);
+  }
+  addSigns(cx,cz,w,d,h,dist,neon);
+}
+function lot(cx,cz,w,d,depth){
+  if (hitsRing(cx,cz,w,d)){
+    if (Math.min(w,d) >= 12 && depth < 3){
+      for (const sx of [-1,1]) for (const sz of [-1,1]) lot(cx+sx*w/4, cz+sz*d/4, w/2, d/2, depth+1);
+    }
+    return;
+  }
+  addBuilding(cx,cz,w-1.5,d-1.5);
+}
+for (let i=-NC;i<=NC;i++) for (let j=-NC;j<=NC;j++){
+  const cx=i*P, cz=j*P;
+  if (Math.hypot(cx,cz) > NC*P+4) continue;
+  const r = rnd(), q = BLOCK/4;
+  if (r < 0.25) lot(cx,cz,BLOCK,BLOCK,0);
+  else if (r < 0.6){
+    if (rnd()<0.5){ lot(cx-q,cz,BLOCK/2,BLOCK,0); lot(cx+q,cz,BLOCK/2,BLOCK,0); }
+    else { lot(cx,cz-q,BLOCK,BLOCK/2,0); lot(cx,cz+q,BLOCK,BLOCK/2,0); }
+  } else { for (const sx of [-1,1]) for (const sz of [-1,1]) lot(cx+sx*q,cz+sz*q,BLOCK/2,BLOCK/2,0); }
+}
+
+/* фонари вдоль кольцевого проспекта */
+for (let k=0;k<N_LAMPS;k++){
+  const a = k/N_LAMPS*Math.PI*2, c=Math.cos(a), s=Math.sin(a);
+  for (const side of [-1,1]){
+    const rp = R + side*10.6, ra = R + side*10.1, rl = R + side*9.6;
+    posts.push({x:c*rp,y:0,z:s*rp,sx:0.28,sy:7.2,sz:0.28,ry:0});
+    posts.push({x:c*ra,y:7.1,z:s*ra,sx:1.3,sy:0.18,sz:0.18,ry:-a});
+    addStaticPoint(c*rl,7.0,s*rl, side<0?[0.3,0.8,1.0]:[1.0,0.55,0.2], 3.2, 0, 2.2);
+  }
+}
+
+/* ───────────────────────── машины ───────────────────────── */
+function addCar(o){
+  cars.push(o);
+  const lin = o.B[3]<0.5 ? Math.abs(o.B[0])*o.A[0] : Math.abs(o.B[0]);
+  const lead = 2.1*o.scale/lin;
+  pts.push({A:o.A,B:o.B,color:o.head,P:[o.glow, lead,0,o.gi]});
+  pts.push({A:o.A,B:o.B,color:o.tail,P:[o.glow*0.8,-lead,0,o.gi*0.8]});
+}
+const RED=[1.0,0.06,0.03], WHITE=[0.75,0.85,1.0], HEAD=[1.0,0.92,0.78];
+// наземный поток по кольцу
+[[R-7.5,1,17],[R-2.5,1,24],[R+2.5,-1,24],[R+7.5,-1,17]].forEach(([r,dir,v])=>{
+  const n=13;
+  for (let k=0;k<n;k++){
+    const ph=(k+rr(-0.3,0.3))/n*Math.PI*2;
+    addCar({A:[r,r,0.65,ph],B:[dir*v/r,0,0,0],color:dir>0?RED:WHITE,len:1.1,width:0.5,scale:1,head:HEAD,tail:RED,glow:2.2,gi:2.2});
+  }
+});
+// летающие машины в «каньоне» над проспектом
+for (let i=0;i<36;i++){
+  const lane=i%4, dir=lane%2?1:-1, h=32+lane*12+rr(-2,2), r=R+rr(-7,7), v=rr(26,44);
+  const col = NEON[[0,1,2,1,0,3][Math.floor(rnd()*6)]];
+  addCar({A:[r,r,h,rr(0,6.283)],B:[dir*v/r,rr(0.5,2),rr(3,8),0],color:col,len:1.6,width:0.7,scale:1.5,head:[0.85,0.95,1.0],tail:col,glow:3.4,gi:2.6});
+}
+// высотные трассы над крышами
+for (let i=0;i<42;i++){
+  const rx=rr(95,330), rz=rx*rr(0.8,1.0), h=rr(185,260), v=rr(40,70), dir=rnd()<0.5?1:-1;
+  const col = NEON[[0,1,2,1,0,4][Math.floor(rnd()*6)]];
+  addCar({A:[rx,rz,h,rr(0,6.283)],B:[dir*v/rx,rr(2,8),rr(2,5),0],color:col,len:2.4,width:1.3,scale:2.2,head:[0.9,0.95,1.0],tail:col,glow:6.0,gi:3.0});
+}
+// машины на прямых улицах
+const LHALF = NC*P+19;
+for (let i=-NC;i<NC;i++) for (let axis=0;axis<2;axis++){
+  if (rnd()>0.75) continue;
+  const coord=(i+0.5)*P;
+  for (let k=0;k<2;k++){
+    const dir=rnd()<0.5?1:-1, v=rr(14,24);
+    addCar({A:[coord+dir*2.2,LHALF,0.65,rr(0,2*LHALF)],B:[dir*v,axis,0,1],color:dir>0?RED:WHITE,len:1.1,width:0.5,scale:1,head:HEAD,tail:RED,glow:2.2,gi:2.0});
+  }
+}
+function pathPosJS(c,t,out){
+  const A=c.A,B=c.B;
+  if (B[3] < 0.5){ const a=A[3]+B[0]*t; out.set(Math.cos(a)*A[0], A[2]+Math.sin(a*B[2])*B[1], Math.sin(a)*A[1]); }
+  else { const m=2*A[1]; let s=(A[3]+B[0]*t)%m; if(s<0)s+=m; s-=A[1]; if (B[1]<0.5) out.set(A[0],A[2],s); else out.set(s,A[2],A[0]); }
+  return out;
+}
+
+/* ───────────────────────── небо ───────────────────────── */
+{
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{uTime}, side:THREE.BackSide, depthWrite:false, depthTest:false,
+    vertexShader:`varying vec3 vDir; void main(){ vDir = position; gl_Position = projectionMatrix*viewMatrix*vec4(position+cameraPosition,1.0); }`,
+    fragmentShader: COMMON + /* glsl */`
+    varying vec3 vDir;
+    void main(){
+      vec3 d = normalize(vDir);
+      float h = max(d.y,0.0);
+      vec3 col = skyBase(normalize(vec3(d.x,h,d.z)));
+      vec2 cp = d.xz/(h+0.22);
+      float cl = fbm(cp*1.3 + vec2(uTime*0.012, uTime*0.004));
+      cl = smoothstep(0.38,0.78,cl)*smoothstep(0.0,0.25,h);
+      vec3 cc = skyBase(normalize(vec3(d.x,0.0,d.z)+vec3(0.0,0.0001,0.0)))*0.5;
+      col = mix(col, cc, cl*0.85);
+      vec3 md = normalize(vec3(-0.45,0.36,-0.8));
+      float ma = max(dot(d,md),0.0);
+      float disc = smoothstep(0.99880,0.99915,ma);
+      float tex = 0.75+0.25*vnoise(d.xy*45.0);
+      col += vec3(0.62,0.78,1.0)*(disc*tex*0.9*(1.0-cl*0.85) + pow(ma,400.0)*0.10 + pow(ma,24.0)*0.03);
+      gl_FragColor = vec4(col,1.0);
+    }`
+  });
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(2500,32,16), mat);
+  sky.frustumCulled = false; sky.renderOrder = -10;
+  scene.add(sky);
+}
+
+/* ───────────────────────── мокрый асфальт ───────────────────────── */
+let ground;
+{
+  const geo = new THREE.PlaneGeometry(4000,4000); geo.rotateX(-Math.PI/2);
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{uTime, tRefl:uRefl, uTexMatrix},
+    vertexShader:/* glsl */`
+    uniform mat4 uTexMatrix; varying vec3 vWorld; varying vec4 vRefl;
+    void main(){ vec4 wp = modelMatrix*vec4(position,1.0); vWorld = wp.xyz; vRefl = uTexMatrix*wp; gl_Position = projectionMatrix*viewMatrix*wp; }`,
+    fragmentShader: COMMON + /* glsl */`
+    uniform sampler2D tRefl;
+    varying vec3 vWorld; varying vec4 vRefl;
+    const float RING = ${R.toFixed(1)};
+    const float LAMPS = ${N_LAMPS.toFixed(1)};
+    vec2 ripple(vec2 p){
+      vec2 acc = vec2(0.0);
+      for (int k=0;k<2;k++){
+        float fk = float(k);
+        vec2 q = p*0.55 + fk*13.7; vec2 c = floor(q); vec2 f = fract(q);
+        float hh = hash21(c + fk*7.0); float t = fract(uTime*0.75 + hh);
+        vec2 ctr = vec2(hash21(c+1.3), hash21(c+5.1))*0.5+0.25;
+        vec2 dv = f - ctr; float l = length(dv)+0.0001;
+        float rad = t*0.25;
+        float w = sin(45.0*(l-rad))*(1.0-smoothstep(0.0,0.07,abs(l-rad)))*(1.0-t);
+        acc += dv/l*w;
+      }
+      return acc;
+    }
+    void main(){
+      vec2 p = vWorld.xz;
+      vec3 Vv = cameraPosition - vWorld; float dist = length(Vv); vec3 V = Vv/dist;
+      float pud = smoothstep(0.40,0.60,fbm(p*0.05+5.0));
+      float grain = vnoise(p*2.3);
+      float rough = mix(0.5+0.4*grain, 0.02, pud);
+      float nearK = 1.0 - smoothstep(25.0,160.0,dist);
+      vec2 nrm = (vec2(vnoise(p*1.9+11.0), vnoise(p*1.9+47.0))-0.5)*2.0;
+      vec2 distort = nrm*0.02*rough*nearK;
+      if (dist < 70.0) distort += ripple(p)*pud*0.012*(1.0-dist/70.0);
+      vec2 uv = vRefl.xy/vRefl.w;
+      float jit = hash21(gl_FragCoord.xy);
+      float stretch = 0.012 + 0.10*rough;
+      float lod = rough*4.5;
+      vec3 refl = vec3(0.0);
+      for (int i=0;i<5;i++){
+        float k = (float(i)+jit)/5.0 - 0.5;
+        refl += textureLod(tRefl, uv + distort + vec2(0.0,k*stretch), lod).rgb;
+      }
+      refl *= 0.2;
+      float cosT = max(V.y,0.0);
+      float fres = pow(1.0-cosT,3.0);
+      float refK = mix(0.3,1.0,fres)*mix(0.5,1.0,pud);
+      vec3 base = vec3(0.010,0.011,0.014)*(0.5+grain)*(1.0-0.6*pud);
+      float r = length(p); float ang = atan(p.y,p.x); float dr = abs(r-RING);
+      float aa = fwidth(r)+0.001;
+      float paint = 0.0;
+      paint += 1.0-smoothstep(0.09,0.09+aa,abs(dr-0.3));
+      paint += (1.0-smoothstep(0.08,0.08+aa,abs(dr-5.0)))*step(0.5,fract(ang*RING/9.0));
+      paint += 1.0-smoothstep(0.10,0.10+aa,abs(dr-10.0));
+      paint *= 1.0/(1.0+aa*8.0);
+      base += vec3(0.07,0.065,0.05)*paint*(1.0-0.7*pud)*(0.6+0.4*grain);
+      float lp = pow(0.5+0.5*cos(ang*LAMPS),10.0);
+      float lIn = exp(-pow((r-(RING-9.6))/4.5,2.0));
+      float lOut = exp(-pow((r-(RING+9.6))/4.5,2.0));
+      base += (vec3(0.25,0.75,1.0)*lIn + vec3(1.0,0.5,0.18)*lOut)*lp*0.035*(0.6+0.6*grain);
+      vec3 col = base + refl*refK;
+      col = applyFog(col, vWorld);
+      gl_FragColor = vec4(col,1.0);
+    }`
+  });
+  ground = new THREE.Mesh(geo, mat);
+  ground.frustumCulled = false;
+  scene.add(ground);
+}
+
+/* ───────────────────────── здания ───────────────────────── */
+{
+  const geo = new THREE.BoxGeometry(1,1,1); geo.translate(0,0.5,0);
+  const n = bld.length;
+  const aParams = new Float32Array(n*4), aNeon = new Float32Array(n*3);
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{uTime},
+    vertexShader:/* glsl */`
+    attribute vec4 aParams; attribute vec3 aNeon;
+    varying vec3 vWorld; varying vec3 vLocal; varying vec3 vNormal; varying vec3 vScale; varying vec4 vParams; varying vec3 vNeon;
+    void main(){
+      vScale = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
+      vLocal = position; vNormal = normal; vParams = aParams; vNeon = aNeon;
+      vec4 wp = modelMatrix*instanceMatrix*vec4(position,1.0);
+      vWorld = wp.xyz; gl_Position = projectionMatrix*viewMatrix*wp;
+    }`,
+    fragmentShader: COMMON + /* glsl */`
+    varying vec3 vWorld; varying vec3 vLocal; varying vec3 vNormal; varying vec3 vScale; varying vec4 vParams; varying vec3 vNeon;
+    void main(){
+      vec3 n = normalize(vNormal);
+      float seed = vParams.x; float style = vParams.y;
+      vec3 V = normalize(cameraPosition - vWorld);
+      float H = vScale.y; float y = vLocal.y*H;
+      vec3 col = vec3(0.011,0.012,0.017);
+      vec3 emis = vec3(0.0);
+      vec3 warm = vec3(1.0,0.60,0.26); vec3 cool = vec3(0.42,0.72,1.0);
+      if (abs(n.y) < 0.5){
+        bool xf = abs(n.x) > 0.5;
+        float faceId = n.x*1.0 + n.z*2.0 + 3.0;
+        float ux = xf ? vLocal.z*vScale.z : vLocal.x*vScale.x;
+        float halfW = 0.5*(xf ? vScale.z : vScale.x);
+        vec2 cs = vec2(mix(1.5,3.0,hash11(seed*7.1)), mix(2.6,3.6,hash11(seed*3.3)));
+        vec2 q = vec2(ux,y)/cs;
+        vec2 cell = floor(q); vec2 f = fract(q);
+        vec2 fw = fwidth(q)+0.0002;
+        vec2 m; vec2 id;
+        if (style < 0.5){ m = vec2(0.2,0.24); id = cell; }
+        else if (style < 1.5){ m = vec2(0.03,0.3); id = vec2(floor(cell.x/4.0 + hash11(cell.y+seed)*4.0), cell.y); }
+        else { m = vec2(0.28,0.03); id = vec2(cell.x, floor(cell.y/3.0 + hash11(cell.x+seed)*3.0)); }
+        float wm = smoothstep(m.x-fw.x,m.x+fw.x,f.x)*smoothstep(m.x-fw.x,m.x+fw.x,1.0-f.x)
+                 * smoothstep(m.y-fw.y,m.y+fw.y,f.y)*smoothstep(m.y-fw.y,m.y+fw.y,1.0-f.y);
+        float r1 = hash21(id + vec2(seed*13.7, faceId*31.0));
+        float r2 = hash21(id*1.31 + vec2(faceId*7.0, seed*5.1));
+        float r3 = hash21(id*0.77 + vec2(seed*2.3, faceId*17.0));
+        float floorR = hash21(vec2(cell.y, seed*3.0+faceId));
+        float dens = mix(0.12,0.6,hash11(seed*1.7))*mix(0.35,1.6,floorR);
+        float lit = step(1.0-dens, r1);
+        float pal = step(0.55, hash11(seed*5.3));
+        vec3 wc = mix(warm, cool, pal);
+        wc = mix(wc, mix(cool,warm,pal), step(r2,0.15));
+        wc = mix(wc, vNeon, step(0.92,r2));
+        float inten = 0.25 + 1.7*r3*r3;
+        if (r3 > 0.95) inten *= 0.6 + 0.6*hash11(floor(uTime*10.0) + r2*57.0);
+        inten *= mix(0.65,1.15,f.y);
+        vec3 detail = wc*inten*lit*wm;
+        vec3 avg = mix(warm,cool,pal)*min(dens,1.0)*0.6*(1.0-2.0*m.x)*(1.0-2.0*m.y);
+        float lodF = clamp(max(fw.x,fw.y)*1.8-0.35,0.0,1.0);
+        emis = mix(detail, avg, lodF);
+        if (vWorld.y < 4.4){
+          float sx = ux/5.0 + seed;
+          float sid = floor(sx);
+          float on = step(0.3, hash11(sid*3.1+seed));
+          vec3 sc = mix(vNeon, warm, step(0.6, hash11(sid*1.3+seed*2.0)));
+          float fx = fract(sx);
+          float sm = smoothstep(0.04,0.1,fx)*smoothstep(0.04,0.1,1.0-fx)*smoothstep(0.5,0.9,vWorld.y)*(1.0-smoothstep(3.7,4.2,vWorld.y));
+          emis = sc*on*sm*1.5;
+        }
+        float band = smoothstep(H-1.7,H-1.5,y)*(1.0-smoothstep(H-0.7,H-0.5,y))*step(0.4,hash11(seed*9.1));
+        emis += vNeon*band*2.6;
+        float fwu = fwidth(ux)+0.0002;
+        float cedge = smoothstep(halfW-0.16-fwu, halfW-0.16+fwu, abs(ux))*step(0.75,hash11(seed*4.7));
+        emis += vNeon*cedge*2.0;
+        vec3 Rv = reflect(-V,n);
+        float fr = pow(1.0-max(dot(V,n),0.0),4.0);
+        col += skyBase(normalize(vec3(Rv.x,abs(Rv.y)+0.02,Rv.z)))*(0.06+0.7*fr);
+        float g = exp(-max(vWorld.y,0.0)/11.0);
+        vec3 gc = mix(vec3(1.0,0.12,0.55), vec3(0.08,0.7,1.0), vnoise(vWorld.xz*0.02+3.0));
+        col += gc*g*0.045;
+      } else if (n.y > 0.5){
+        vec2 e = (0.5-abs(vLocal.xz))*vScale.xz; float dE = min(e.x,e.y);
+        emis += vNeon*(1.0-smoothstep(0.15,0.45,dE))*0.6*step(0.5,hash11(seed*2.9));
+        col = vec3(0.012,0.013,0.018);
+      }
+      col += emis;
+      col = applyFog(col, vWorld);
+      gl_FragColor = vec4(col,1.0);
+    }`
+  });
+  const mesh = new THREE.InstancedMesh(geo, mat, n);
+  const m4 = new THREE.Matrix4();
+  bld.forEach((b,i)=>{
+    m4.makeScale(b.w,b.h,b.d); m4.setPosition(b.x,b.y,b.z); mesh.setMatrixAt(i,m4);
+    aParams.set([b.seed,b.style,0,0], i*4); aNeon.set(b.neon, i*3);
+  });
+  geo.setAttribute('aParams', new THREE.InstancedBufferAttribute(aParams,4));
+  geo.setAttribute('aNeon', new THREE.InstancedBufferAttribute(aNeon,3));
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+}
+
+/* ───────────────────────── неоновые вывески ───────────────────────── */
+{
+  const geo = new THREE.PlaneGeometry(1,1);
+  const n = signs.length;
+  const aSign = new Float32Array(n*4), aType = new Float32Array(n);
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{uTime}, side:THREE.DoubleSide,
+    vertexShader:/* glsl */`
+    attribute vec4 aSign; attribute float aType;
+    varying vec2 vUv; varying vec2 vSize; varying vec3 vCol; varying float vSeed; varying float vType; varying vec3 vWorld;
+    void main(){
+      vSize = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
+      vUv = uv; vCol = aSign.rgb; vSeed = aSign.w; vType = aType;
+      vec4 wp = modelMatrix*instanceMatrix*vec4(position,1.0);
+      vWorld = wp.xyz; gl_Position = projectionMatrix*viewMatrix*wp;
+    }`,
+    fragmentShader: COMMON + /* glsl */`
+    varying vec2 vUv; varying vec2 vSize; varying vec3 vCol; varying float vSeed; varying float vType; varying vec3 vWorld;
+    float glyph(vec2 f, float id){
+      f = (f-0.14)/0.72;
+      if (f.x<0.0||f.x>1.0||f.y<0.0||f.y>1.0) return 0.0;
+      vec2 g = floor(f*vec2(5.0,6.0));
+      g.x = min(g.x, 4.0-g.x);
+      return step(0.42, hash21(g + id*7.31));
+    }
+    void main(){
+      vec2 p = vUv*vSize;
+      float edgeD = min(min(p.x,vSize.x-p.x), min(p.y,vSize.y-p.y));
+      vec3 col = vec3(0.0);
+      float flick = 1.0;
+      if (hash11(vSeed*3.7) > 0.8) flick = 0.35 + 0.65*step(0.25, hash11(floor(uTime*14.0)+vSeed*91.0));
+      if (vType < 0.5){
+        float cs = min(vSize.x,vSize.y);
+        vec2 q = p/cs; vec2 cell = floor(q);
+        float g = glyph(fract(q), cell.x + cell.y*3.0 + floor(vSeed*50.0));
+        float frame = 1.0 - smoothstep(0.06*cs, 0.06*cs+0.05, edgeD);
+        col = vCol*(g*3.2 + frame*2.0 + 0.05)*flick;
+      } else if (vType < 1.5){
+        vec2 q = p/0.5; vec2 cell = floor(q); vec2 f = fract(q);
+        float t = uTime; float ph = vSeed*40.0;
+        float v = sin(cell.x*0.35 + sin(cell.y*0.21+t*0.7+ph)*2.0 + t*1.3 + ph);
+        float v2 = sin(cell.y*0.5 - t*0.9 + ph*1.7 + cell.x*0.1);
+        float nn = hash21(cell + floor(t*3.0+ph));
+        vec3 c = mix(vCol, vCol.brg, smoothstep(-0.3,0.3,v2));
+        float b = smoothstep(-0.2,0.6,v)*0.8 + nn*0.25;
+        float gs = vSize.y*0.6;
+        vec2 gq = (p - vec2(mod(t*2.0+ph, vSize.x+gs*4.0)-gs*4.0, vSize.y*0.2))/gs;
+        float gl = (gq.y>0.0&&gq.y<1.0&&gq.x>0.0&&gq.x<4.0) ? glyph(fract(gq), floor(gq.x)+floor(vSeed*30.0)) : 0.0;
+        c = c*b*1.5 + vec3(1.0)*gl*1.8;
+        float pm = smoothstep(0.05,0.25,f.x)*smoothstep(0.05,0.25,f.y);
+        float lodm = clamp(fwidth(q.x)*1.5,0.0,1.0);
+        col = c*mix(pm,0.6,lodm);
+      } else {
+        vec2 c = (vUv-0.5)*vSize/(0.5*min(vSize.x,vSize.y));
+        float d = length(c);
+        float ringL = 1.0 - smoothstep(0.05,0.09,abs(d-0.82));
+        float pulse = 0.7+0.3*sin(uTime*1.5+vSeed*20.0);
+        float g = (abs(c.x)<0.5 && abs(c.y)<0.5) ? glyph(c+0.5, floor(vSeed*77.0)) : 0.0;
+        col = vCol*(ringL*3.0*pulse + g*3.0)*flick;
+        if (max(col.r,max(col.g,col.b)) < 0.02) discard;
+      }
+      col = applyFog(col, vWorld);
+      gl_FragColor = vec4(col,1.0);
+    }`
+  });
+  const mesh = new THREE.InstancedMesh(geo, mat, n);
+  const d = new THREE.Object3D();
+  signs.forEach((s,i)=>{
+    d.position.set(s.x,s.y,s.z); d.rotation.set(0,s.ry,0); d.scale.set(s.sx,s.sy,1); d.updateMatrix();
+    mesh.setMatrixAt(i,d.matrix);
+    aSign.set([s.col[0],s.col[1],s.col[2],s.seed], i*4); aType[i]=s.type;
+  });
+  geo.setAttribute('aSign', new THREE.InstancedBufferAttribute(aSign,4));
+  geo.setAttribute('aType', new THREE.InstancedBufferAttribute(aType,1));
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+}
+
+/* ───────────────────────── тёмный «металл»: столбы, антенны, кузова ───────────────────────── */
+const darkMat = new THREE.ShaderMaterial({
+  uniforms:{uTime},
+  vertexShader:/* glsl */`
+  varying vec3 vN; varying vec3 vWorld;
+  void main(){ vec4 wp = modelMatrix*instanceMatrix*vec4(position,1.0); vWorld = wp.xyz;
+    vN = normalize(mat3(instanceMatrix)*normal); gl_Position = projectionMatrix*viewMatrix*wp; }`,
+  fragmentShader: COMMON + /* glsl */`
+  varying vec3 vN; varying vec3 vWorld;
+  void main(){
+    vec3 n = normalize(vN); vec3 V = normalize(cameraPosition - vWorld);
+    vec3 Rv = reflect(-V,n); float fr = pow(1.0-max(dot(n,V),0.0),3.0);
+    vec3 col = vec3(0.012,0.013,0.018) + skyBase(normalize(vec3(Rv.x,abs(Rv.y)+0.05,Rv.z)))*(0.15+0.85*fr)*0.9;
+    col = applyFog(col, vWorld);
+    gl_FragColor = vec4(col,1.0);
+  }`
+});
+{
+  const geo = new THREE.BoxGeometry(1,1,1); geo.translate(0,0.5,0);
+  const mesh = new THREE.InstancedMesh(geo, darkMat, posts.length);
+  const d = new THREE.Object3D();
+  posts.forEach((p,i)=>{ d.position.set(p.x,p.y,p.z); d.rotation.set(0,p.ry,0); d.scale.set(p.sx,p.sy,p.sz); d.updateMatrix(); mesh.setMatrixAt(i,d.matrix); });
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+}
+const carMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.9,0.9,4.4), darkMat, cars.length);
+carMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+carMesh.frustumCulled = false;
+scene.add(carMesh);
+
+/* ───────────────────────── световые следы ───────────────────────── */
+{
+  const SEG = 20, VPC = (SEG+1)*2, n = cars.length;
+  const pos = new Float32Array(n*VPC*3), aA = new Float32Array(n*VPC*4), aB = new Float32Array(n*VPC*4),
+        aC = new Float32Array(n*VPC*3), aT = new Float32Array(n*VPC*3), aW = new Float32Array(n*VPC);
+  const idx = new Uint32Array(n*SEG*6);
+  let v=0, ii=0;
+  cars.forEach(c=>{
+    const base=v;
+    for (let s=0;s<=SEG;s++) for (let e=-1;e<=1;e+=2){
+      aA.set(c.A,v*4); aB.set(c.B,v*4); aC.set(c.color,v*3);
+      aT[v*3]=s/SEG; aT[v*3+1]=e; aT[v*3+2]=c.len; aW[v]=c.width; v++;
+    }
+    for (let s=0;s<SEG;s++){ const o=base+s*2; idx[ii++]=o; idx[ii++]=o+1; idx[ii++]=o+2; idx[ii++]=o+1; idx[ii++]=o+3; idx[ii++]=o+2; }
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('aA', new THREE.BufferAttribute(aA,4));
+  geo.setAttribute('aB', new THREE.BufferAttribute(aB,4));
+  geo.setAttribute('aColor', new THREE.BufferAttribute(aC,3));
+  geo.setAttribute('aT', new THREE.BufferAttribute(aT,3));
+  geo.setAttribute('aW', new THREE.BufferAttribute(aW,1));
+  geo.setIndex(new THREE.BufferAttribute(idx,1));
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{uTime}, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide,
+    vertexShader: COMMON + PATH + /* glsl */`
+    attribute vec4 aA; attribute vec4 aB; attribute vec3 aColor; attribute vec3 aT; attribute float aW;
+    varying vec3 vColor; varying float vAlpha; varying float vSide;
+    void main(){
+      float t = uTime - aT.x*aT.z;
+      vec3 p = pathPos(aA,aB,t);
+      vec3 p2 = pathPos(aA,aB,t+0.04);
+      vec3 tang = normalize(p2-p+vec3(1e-5));
+      vec3 toCam = cameraPosition - p; float dist = length(toCam)+0.0001;
+      vec3 sd = normalize(cross(tang, toCam/dist)+vec3(0.0,1e-4,0.0));
+      float w0 = aW*(1.0-0.65*aT.x);
+      float w = max(w0, dist*0.0011);
+      p += sd*aT.y*w;
+      vAlpha = pow(1.0-aT.x,1.6)*pathFade(aA,aB,p)*exp(-dist*0.0035)*(w0/w);
+      vSide = aT.y; vColor = aColor;
+      gl_Position = projectionMatrix*viewMatrix*vec4(p,1.0);
+    }`,
+    fragmentShader:/* glsl */`
+    varying vec3 vColor; varying float vAlpha; varying float vSide;
+    void main(){ float s = 1.0 - vSide*vSide; gl_FragColor = vec4(vColor*vAlpha*s*1.7, 1.0); }`
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+}
+
+/* ───────────────────────── световые точки (фары, фонари, маяки) ───────────────────────── */
+{
+  const n = pts.length;
+  const pos = new Float32Array(n*3), aA = new Float32Array(n*4), aB = new Float32Array(n*4), aC = new Float32Array(n*3), aP = new Float32Array(n*4);
+  pts.forEach((p,i)=>{ aA.set(p.A,i*4); aB.set(p.B,i*4); aC.set(p.color,i*3); aP.set(p.P,i*4); });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('aA', new THREE.BufferAttribute(aA,4));
+  geo.setAttribute('aB', new THREE.BufferAttribute(aB,4));
+  geo.setAttribute('aColor', new THREE.BufferAttribute(aC,3));
+  geo.setAttribute('aP', new THREE.BufferAttribute(aP,4));
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{uTime, uPx}, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    vertexShader: COMMON + PATH + /* glsl */`
+    attribute vec4 aA; attribute vec4 aB; attribute vec3 aColor; attribute vec4 aP;
+    uniform float uPx;
+    varying vec3 vColor; varying float vI;
+    void main(){
+      vec3 p = pathPos(aA,aB,uTime+aP.y);
+      vec4 mv = viewMatrix*vec4(p,1.0);
+      gl_Position = projectionMatrix*mv;
+      vec4 mv2 = mv; mv2.z += aP.x*0.8;
+      vec4 pj2 = projectionMatrix*mv2;
+      if (pj2.w > 0.0) gl_Position.z = pj2.z/pj2.w*gl_Position.w;
+      float dist = max(-mv.z,0.5);
+      float sz = aP.x*uPx/dist;
+      float I = aP.w*pathFade(aA,aB,p)*exp(-dist*0.0035);
+      I *= min(1.0, sz/2.5);
+      if (aP.z > 0.0) I *= pow(0.5+0.5*sin(uTime*aP.z*6.2832 + aA.w*10.0), 6.0);
+      gl_PointSize = clamp(sz, 2.5, 90.0);
+      vI = I; vColor = aColor;
+    }`,
+    fragmentShader:/* glsl */`
+    varying vec3 vColor; varying float vI;
+    void main(){
+      float d = length(gl_PointCoord-0.5)*2.0;
+      float g = exp(-d*d*8.0) + exp(-d*3.5)*0.25;
+      g *= 1.0 - smoothstep(0.7,1.0,d);
+      gl_FragColor = vec4(mix(vColor, vec3(1.0), exp(-d*d*40.0)*0.6)*vI*g, 1.0);
+    }`
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  scene.add(points);
+}
+
+/* ───────────────────────── дождь ───────────────────────── */
+let rain;
+{
+  const n = 7000;
+  const pos = new Float32Array(n*6), aEnd = new Float32Array(n*2);
+  for (let i=0;i<n;i++){
+    const x=rnd()*80, y=rnd()*80, z=rnd()*80;
+    pos.set([x,y,z,x,y,z], i*6); aEnd[i*2]=0; aEnd[i*2+1]=1;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('aEnd', new THREE.BufferAttribute(aEnd,1));
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{uTime}, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    vertexShader: COMMON + /* glsl */`
+    attribute float aEnd; varying float vA;
+    void main(){
+      vec3 p = position;
+      float sp = 50.0 + 30.0*hash11(position.x*12.3+position.z*7.7);
+      p.y -= mod(uTime*sp, 80.0);
+      p.x += mod(uTime*5.0, 80.0);
+      vec3 q = mod(p - cameraPosition + 40.0, 80.0) - 40.0;
+      vec3 w = cameraPosition + q + aEnd*vec3(0.1,1.0,0.0)*(sp*0.028);
+      gl_Position = projectionMatrix*viewMatrix*vec4(w,1.0);
+      vA = (1.0-smoothstep(18.0,40.0,length(q)))*(0.35+0.65*aEnd);
+    }`,
+    fragmentShader:`varying float vA; void main(){ gl_FragColor = vec4(vec3(0.55,0.65,0.9)*vA*0.22, 1.0); }`
+  });
+  rain = new THREE.LineSegments(geo, mat);
+  rain.frustumCulled = false;
+  scene.add(rain);
+}
+
+/* ───────────────────────── прожекторы ───────────────────────── */
+const beams = [];
+{
+  const geo = new THREE.CylinderGeometry(24,1,520,20,1,true); geo.translate(0,260,0);
+  const defs = [[0,150,0,[0.4,0.7,1.0]],[235,0,-150,[1.0,0.25,0.7]],[-250,0,95,[0.3,0.9,1.0]],[70,0,265,[0.8,0.5,1.0]]];
+  for (const [x,y,z,c] of defs){
+    const mat = new THREE.ShaderMaterial({
+      uniforms:{uColor:{value:new THREE.Vector3(c[0],c[1],c[2])}},
+      transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide,
+      vertexShader:/* glsl */`
+      varying vec3 vN; varying vec3 vW; varying float vH;
+      void main(){ vec4 wp = modelMatrix*vec4(position,1.0); vW = wp.xyz; vN = normalize(mat3(modelMatrix)*normal); vH = uv.y;
+        gl_Position = projectionMatrix*viewMatrix*wp; }`,
+      fragmentShader:/* glsl */`
+      uniform vec3 uColor; varying vec3 vN; varying vec3 vW; varying float vH;
+      void main(){
+        vec3 Vv = cameraPosition - vW; float dist = length(Vv)+0.0001;
+        float e = abs(dot(normalize(vN), Vv/dist));
+        float a = pow(e,2.5)*pow(1.0-vH,1.5)*exp(-dist*0.0018);
+        gl_FragColor = vec4(uColor*a*0.10, 1.0);
+      }`
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x,y,z); m.frustumCulled = false;
+    scene.add(m); beams.push(m);
+  }
+}
+
+/* ───────────────────────── пост-обработка ───────────────────────── */
+const HF = THREE.HalfFloatType;
+const rtScene = new THREE.WebGLRenderTarget(2,2,{type:HF, samples:4, depthBuffer:true, minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter});
+const rtRefl = new THREE.WebGLRenderTarget(2,2,{type:HF, depthBuffer:true, generateMipmaps:true, minFilter:THREE.LinearMipmapLinearFilter, magFilter:THREE.LinearFilter});
+uRefl.value = rtRefl.texture;
+const LEVELS = 6;
+const mkRT = ()=> new THREE.WebGLRenderTarget(2,2,{type:HF, depthBuffer:false, minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter});
+const blooms = []; for (let i=0;i<LEVELS;i++) blooms.push(mkRT());
+const streakA = mkRT(), streakB = mkRT();
+
+const postScene = new THREE.Scene();
+const postCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const triGeo = new THREE.BufferGeometry();
+triGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1,-1,0, 3,-1,0, -1,3,0]),3));
+const quad = new THREE.Mesh(triGeo, null); quad.frustumCulled = false; postScene.add(quad);
+const POST_VS = `varying vec2 vUv; void main(){ vUv = position.xy*0.5+0.5; gl_Position = vec4(position.xy,0.0,1.0); }`;
+const postMat = (fs, uniforms, extra={}) => new THREE.ShaderMaterial(Object.assign({vertexShader:POST_VS, fragmentShader:fs, uniforms, depthTest:false, depthWrite:false}, extra));
+
+const downMat = postMat(/* glsl */`
+  uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uFirst; varying vec2 vUv;
+  float kw(vec3 c){ return 1.0/(1.0+max(c.r,max(c.g,c.b))); }
+  void main(){
+    vec4 o = uTexel.xyxy*vec4(-1.0,-1.0,1.0,1.0);
+    vec3 a = texture2D(tSrc, vUv+o.xy).rgb; vec3 b = texture2D(tSrc, vUv+o.zy).rgb;
+    vec3 c = texture2D(tSrc, vUv+o.xw).rgb; vec3 d = texture2D(tSrc, vUv+o.zw).rgb;
+    vec3 r;
+    if (uFirst > 0.5){
+      a = min(a,vec3(30.0)); b = min(b,vec3(30.0)); c = min(c,vec3(30.0)); d = min(d,vec3(30.0));
+      float wa=kw(a), wb=kw(b), wc=kw(c), wd=kw(d);
+      r = (a*wa+b*wb+c*wc+d*wd)/(wa+wb+wc+wd);
+    } else r = (a+b+c+d)*0.25;
+    gl_FragColor = vec4(max(r,vec3(0.0)),1.0);
+  }`, {tSrc:{value:null}, uTexel:{value:new THREE.Vector2()}, uFirst:{value:0}});
+
+const upMat = postMat(/* glsl */`
+  uniform sampler2D tSrc; uniform vec2 uTexel; varying vec2 vUv;
+  void main(){
+    vec4 o = uTexel.xyxy*vec4(1.0,1.0,-1.0,0.0);
+    vec3 s = texture2D(tSrc, vUv-o.xy).rgb + texture2D(tSrc, vUv-o.wy).rgb*2.0 + texture2D(tSrc, vUv-o.zy).rgb
+           + texture2D(tSrc, vUv+o.zw).rgb*2.0 + texture2D(tSrc, vUv).rgb*4.0 + texture2D(tSrc, vUv+o.xw).rgb*2.0
+           + texture2D(tSrc, vUv+o.zy).rgb + texture2D(tSrc, vUv+o.wy).rgb*2.0 + texture2D(tSrc, vUv+o.xy).rgb;
+    gl_FragColor = vec4(s/16.0, 1.0);
+  }`, {tSrc:{value:null}, uTexel:{value:new THREE.Vector2()}}, {blending:THREE.AdditiveBlending, transparent:true});
+
+const streakMat = postMat(/* glsl */`
+  uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uStep; uniform float uThresh; varying vec2 vUv;
+  void main(){
+    vec3 acc = vec3(0.0); float ws = 0.0;
+    for (int i=-8;i<=8;i++){
+      float fi = float(i); float w = 1.0 - abs(fi)/9.0;
+      vec3 c = texture2D(tSrc, vUv + vec2(fi*uStep*uTexel.x, 0.0)).rgb;
+      c = max(c - uThresh, vec3(0.0));
+      acc += c*w; ws += w;
+    }
+    gl_FragColor = vec4(acc/ws, 1.0);
+  }`, {tSrc:{value:null}, uTexel:{value:new THREE.Vector2()}, uStep:{value:1}, uThresh:{value:0}});
+
+const compMat = postMat(/* glsl */`
+  uniform sampler2D tScene; uniform sampler2D tBloom; uniform sampler2D tStreak;
+  uniform float uTime; uniform float uFade; varying vec2 vUv;
+  float hash21(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*0.1031); p3 += dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+  vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0); }
+  void main(){
+    vec2 c = vUv-0.5; float r2 = dot(c,c);
+    vec2 off = c*(0.0025 + r2*0.018);
+    vec3 col = vec3(texture2D(tScene, vUv-off).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv+off).b);
+    vec3 bloom = texture2D(tBloom, vUv).rgb*(1.0/6.0);
+    vec3 streak = texture2D(tStreak, vUv).rgb;
+    col += bloom*0.55;
+    col += streak*vec3(0.35,0.55,1.0)*0.7;
+    col *= 1.15;
+    col *= pow(clamp(1.0-r2*1.0,0.0,1.0),1.5);
+    col = aces(col);
+    float l = dot(col, vec3(0.2126,0.7152,0.0722));
+    col = mix(vec3(l), col, 1.12);
+    col += vec3(-0.004,0.004,0.014)*(1.0-l);
+    col = pow(max(col,vec3(0.0)), vec3(1.0/2.2));
+    col = mix(col, col*col*(3.0-2.0*col), 0.22);
+    col += (hash21(gl_FragCoord.xy + fract(uTime)*311.0)-0.5)*0.035;
+    gl_FragColor = vec4(col*uFade, 1.0);
+  }`, {tScene:{value:rtScene.texture}, tBloom:{value:blooms[0].texture}, tStreak:{value:streakB.texture}, uTime, uFade:{value:0}});
+
+function blit(mat, target){ quad.material = mat; renderer.setRenderTarget(target); renderer.render(postScene, postCam); }
+
+/* ───────────────────────── resize / качество ───────────────────────── */
+let pr = Math.min(window.devicePixelRatio || 1, 1.5);
+const bufSize = new THREE.Vector2();
+function resize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setPixelRatio(pr); renderer.setSize(w,h);
+  renderer.getDrawingBufferSize(bufSize);
+  const W = Math.max(2,bufSize.x), H = Math.max(2,bufSize.y);
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  rtScene.setSize(W,H);
+  rtRefl.setSize(Math.max(2,W>>1), Math.max(2,H>>1));
+  let bw=W, bh=H;
+  for (const rt of blooms){ bw=Math.max(2,bw>>1); bh=Math.max(2,bh>>1); rt.setSize(bw,bh); }
+  streakA.setSize(blooms[2].width, blooms[2].height);
+  streakB.setSize(blooms[2].width, blooms[2].height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ───────────────────────── цикл ───────────────────────── */
+const clock = new THREE.Clock();
+let T = 40, elapsed = 0, fAcc = 0, fCnt = 0;
+const target = new THREE.Vector3(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3();
+const camPos = new THREE.Vector3(), fwd = new THREE.Vector3(), upv = new THREE.Vector3(), tgt = new THREE.Vector3();
+const dummy = new THREE.Object3D();
+const tanHalf = () => Math.tan(THREE.MathUtils.degToRad(camera.fov*0.5));
+
+function updateCamera(){
+  const a = T*0.042;
+  const r = R + 3.2*Math.sin(T*0.11);
+  const y = 12 + 7.5*Math.sin(T*0.083+1.0);
+  camera.position.set(Math.cos(a)*r, y, Math.sin(a)*r);
+  const a2 = a + 0.44;
+  const r2 = R - 2 + 4*Math.sin(T*0.07);
+  const y2 = 11 + 9*Math.sin(T*0.057+2.0);
+  target.set(Math.cos(a2)*r2, y2, Math.sin(a2)*r2);
+  camera.up.set(0,1,0);
+  camera.lookAt(target);
+  camera.rotateZ(0.03 + 0.045*Math.sin(T*0.09));
+  camera.updateMatrixWorld();
+}
+function updateMirror(){
+  camPos.setFromMatrixPosition(camera.matrixWorld);
+  fwd.set(0,0,-1).applyQuaternion(camera.quaternion);
+  upv.set(0,1,0).applyQuaternion(camera.quaternion);
+  mirrorCam.position.set(camPos.x,-camPos.y,camPos.z);
+  mirrorCam.up.set(upv.x,-upv.y,upv.z);
+  tgt.set(camPos.x+fwd.x, -(camPos.y+fwd.y), camPos.z+fwd.z);
+  mirrorCam.lookAt(tgt);
+  mirrorCam.projectionMatrix.copy(camera.projectionMatrix);
+  mirrorCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
+  mirrorCam.updateMatrixWorld();
+  uTexMatrix.value.set(0.5,0,0,0.5, 0,0.5,0,0.5, 0,0,0.5,0.5, 0,0,0,1);
+  uTexMatrix.value.multiply(mirrorCam.projectionMatrix).multiply(mirrorCam.matrixWorldInverse);
+}
+
+function frame(){
+  requestAnimationFrame(frame);
+  const raw = clock.getDelta();
+  const dt = Math.min(raw, 0.1);
+  T += dt; elapsed += dt; uTime.value = T;
+
+  // адаптивное разрешение для стабильных 60 к/с
+  if (elapsed > 3 && raw < 0.2){
+    fAcc += raw; fCnt++;
+    if (fCnt >= 90){
+      if (fAcc/fCnt > 1/45 && pr > 0.65){ pr = Math.max(0.65, pr*0.82); resize(); }
+      fAcc = 0; fCnt = 0;
+    }
+  }
+
+  updateCamera();
+  updateMirror();
+
+  for (let i=0;i<cars.length;i++){
+    const c = cars[i];
+    pathPosJS(c,T,v1); pathPosJS(c,T+0.05,v2);
+    dummy.position.copy(v1); dummy.lookAt(v2); dummy.scale.setScalar(c.scale); dummy.updateMatrix();
+    carMesh.setMatrixAt(i,dummy.matrix);
+  }
+  carMesh.instanceMatrix.needsUpdate = true;
+
+  for (let i=0;i<beams.length;i++){
+    beams[i].rotation.set(0.45*Math.sin(T*0.21+i*1.7), 0, 0.45*Math.cos(T*0.17+i*2.3));
+  }
+
+  // 1) отражение
+  ground.visible = false; rain.visible = false;
+  uPx.value = rtRefl.height/(2*tanHalf());
+  renderer.setRenderTarget(rtRefl); renderer.clear();
+  renderer.render(scene, mirrorCam);
+
+  // 2) основная сцена (HDR + MSAA)
+  ground.visible = true; rain.visible = true;
+  uPx.value = rtScene.height/(2*tanHalf());
+  renderer.setRenderTarget(rtScene); renderer.clear();
+  renderer.render(scene, camera);
+
+  // 3) bloom: пирамида вниз
+  let src = rtScene;
+  for (let i=0;i<LEVELS;i++){
+    downMat.uniforms.tSrc.value = src.texture;
+    downMat.uniforms.uTexel.value.set(1/src.width, 1/src.height);
+    downMat.uniforms.uFirst.value = i===0 ? 1 : 0;
+    blit(downMat, blooms[i]); src = blooms[i];
+  }
+  // 4) анаморфные блики
+  streakMat.uniforms.tSrc.value = blooms[2].texture;
+  streakMat.uniforms.uTexel.value.set(1/blooms[2].width, 1/blooms[2].height);
+  streakMat.uniforms.uStep.value = 1.5; streakMat.uniforms.uThresh.value = 0.6;
+  blit(streakMat, streakA);
+  streakMat.uniforms.tSrc.value = streakA.texture;
+  streakMat.uniforms.uStep.value = 5.0; streakMat.uniforms.uThresh.value = 0.0;
+  blit(streakMat, streakB);
+  // 5) bloom: пирамида вверх
+  for (let i=LEVELS-2;i>=0;i--){
+    upMat.uniforms.tSrc.value = blooms[i+1].texture;
+    upMat.uniforms.uTexel.value.set(1/blooms[i+1].width, 1/blooms[i+1].height);
+    blit(upMat, blooms[i]);
+  }
+  // 6) финальная композиция
+  compMat.uniforms.uFade.value = Math.min(1, elapsed/3.5);
+  compMat.uniforms.uFade.value *= compMat.uniforms.uFade.value*(3-2*compMat.uniforms.uFade.value) > 0 ? 1 : 1;
+  blit(compMat, null);
+}
+frame();
+</script>
+</body>
+</html>

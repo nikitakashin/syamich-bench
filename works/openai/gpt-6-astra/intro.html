@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#030509">
+<title>AI Native Сямыч — Intro</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #030509;
+  }
+  body {
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(ellipse at 50% 45%, #10212b 0%, #090c16 38%, #030509 75%);
+  }
+  .frame {
+    position: relative;
+    width: min(100vw, 56.25vh);
+    width: min(100vw, 56.25dvh);
+    aspect-ratio: 9 / 16;
+    overflow: hidden;
+    background: #030509;
+    box-shadow: 0 0 140px #00d9ff0c;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<main class="frame" aria-label="Анимированная заставка канала AI Native Сямыч">
+  <h1 class="sr-only">СЯМЫЧ — AI Native</h1>
+  <canvas aria-hidden="true"></canvas>
+</main>
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.querySelector('canvas');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const W = 1080, H = 1920, DURATION = 5;
+  const CYAN = '#7afaff', VIOLET = '#a78bff';
+  const TAU = Math.PI * 2;
+  const mono = 'ui-monospace, "SFMono-Regular", Consolas, monospace';
+  const sans = 'Arial, Helvetica, sans-serif';
+  let scale = 1;
+
+  const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+  const smooth = (a, b, t) => {
+    const x = clamp((t - a) / (b - a));
+    return x * x * (3 - 2 * x);
+  };
+  const out = x => 1 - Math.pow(1 - clamp(x), 4);
+
+  let seed = 2917;
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  const stars = Array.from({ length: 140 }, () => ({
+    x: random() * W,
+    y: random() * H,
+    r: .6 + random() * 1.8,
+    phase: random() * TAU
+  }));
+
+  const particles = Array.from({ length: 105 }, () => ({
+    angle: random() * TAU,
+    radius: 70 + random() * 420,
+    speed: .5 + random(),
+    length: 4 + random() * 28,
+    phase: random(),
+    color: random() > .3 ? CYAN : VIOLET
+  }));
+
+  const nodes = Array.from({ length: 30 }, (_, i) => ({
+    angle: i / 30 * TAU + random() * .14,
+    radius: 245 + random() * 145,
+    z: random()
+  }));
+
+  const code = [
+    'const future = await create();',
+    'agent.think({ mode: "native" });',
+    'while (idea) { ship(); }',
+    'model.connect(human);',
+    '> imagination.compile()',
+    'import { next } from "now";',
+    'neural.link → established',
+    '01001001  /  01000001'
+  ];
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    scale = canvas.width / W;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Текст растеризуется один раз; глитч собирается из его срезов.
+  const title = document.createElement('canvas');
+  title.width = 1080;
+  title.height = 300;
+  const tc = title.getContext('2d');
+  tc.textAlign = 'center';
+  tc.textBaseline = 'alphabetic';
+  tc.font = `900 220px ${sans}`;
+  const titleGradient = tc.createLinearGradient(0, 50, 0, 245);
+  titleGradient.addColorStop(0, '#ffffff');
+  titleGradient.addColorStop(.47, '#f5ffff');
+  titleGradient.addColorStop(.68, '#cce7ee');
+  titleGradient.addColorStop(1, '#7c9cae');
+  tc.shadowColor = '#5ceeff';
+  tc.shadowBlur = 24;
+  tc.fillStyle = titleGradient;
+  tc.fillText('СЯМЫЧ', 540, 236, 940);
+  tc.shadowBlur = 0;
+  tc.strokeStyle = '#ffffff90';
+  tc.lineWidth = 1;
+  tc.strokeText('СЯМЫЧ', 540, 236, 940);
+
+  function line(x1, y1, x2, y2, color, width = 1) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+
+  function text(str, x, y, size, color, align = 'left', font = mono) {
+    ctx.font = `${size}px ${font}`;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    ctx.fillText(str, x, y);
+  }
+
+  function spaced(str, x, y, size, spacing, color) {
+    ctx.font = `600 ${size}px ${sans}`;
+    ctx.textBaseline = 'middle';
+    const letters = [...str];
+    const widths = letters.map(c => ctx.measureText(c).width);
+    let left = x - (widths.reduce((a, b) => a + b, 0) +
+      spacing * (letters.length - 1)) / 2;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    letters.forEach((c, i) => {
+      ctx.fillText(c, left, y);
+      left += widths[i] + spacing;
+    });
+  }
+
+  function glow(x, y, radius, color) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    g.addColorStop(0, color);
+    g.addColorStop(1, '#00000000');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+
+  function ring(radius, angle, alpha, color, width = 1.5) {
+    ctx.save();
+    ctx.translate(540, 875);
+    ctx.rotate(angle);
+    ctx.strokeStyle = color;
+    ctx.globalAlpha *= alpha;
+    ctx.lineWidth = width;
+    for (let j = 0; j < 3; j++) {
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, j * TAU / 3, j * TAU / 3 + 1.42);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function render(t) {
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#030509';
+    ctx.fillRect(0, 0, W, H);
+
+    const build = smooth(.2, 1.7, t);
+    const hit = smooth(1.68, 1.88, t);
+    const hero = smooth(1.86, 2.22, t);
+    const end = 1 - smooth(4.55, 5, t);
+    const envelope = smooth(0, .22, t) * end;
+    const pulse = Math.exp(-Math.pow((t - 1.88) / .105, 2));
+
+    glow(540, 830, 820, '#0b27313d');
+    glow(890, 1200, 670, '#41207220');
+
+    // Неподвижная сетка и бесшовное мерцание звёзд.
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#78cddd07';
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 90) {
+      ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    }
+    for (let y = 0; y <= H; y += 90) {
+      ctx.moveTo(0, y); ctx.lineTo(W, y);
+    }
+    ctx.stroke();
+
+    stars.forEach(s => {
+      ctx.globalAlpha = .16 + .28 * (.5 + .5 * Math.sin(t / 5 * TAU + s.phase));
+      ctx.fillStyle = '#c6f2ff';
+      ctx.fillRect(s.x, s.y, s.r, s.r);
+    });
+
+    ctx.globalAlpha = envelope;
+
+    // Рамка и техническая типографика.
+    const corners = [[60, 86, 1, 1], [1020, 86, -1, 1],
+                     [60, 1834, 1, -1], [1020, 1834, -1, -1]];
+    corners.forEach(([x, y, dx, dy]) => {
+      line(x, y, x + dx * 35, y, '#7afaff66', 2);
+      line(x, y, x, y + dy * 35, '#7afaff66', 2);
+    });
+
+    text('AI / NATIVE', 88, 140, 23, '#d6f7ff');
+    text('CHANNEL_001', 992, 140, 18, '#76909e', 'right');
+    line(88, 180, 992, 180, '#a7d9e524');
+
+    ctx.fillStyle = CYAN;
+    ctx.shadowColor = CYAN;
+    ctx.shadowBlur = 16;
+    ctx.fillRect(89, 224, 7, 7);
+    ctx.shadowBlur = 0;
+    text(t < 1.85 ? 'NEURAL ENGINE / INITIALIZING' : 'NEURAL ENGINE / ONLINE',
+      113, 229, 17, '#8cabb5');
+
+    // Код в периферии: не конкурирует с названием.
+    ctx.save();
+    ctx.globalAlpha *= .28 * (1 - hero * .55);
+    code.forEach((str, i) => {
+      const y = 380 + i * 154 - ((t * (17 + i % 3 * 5)) % 70);
+      const x = i % 2 ? 590 : 88;
+      text(str.slice(0, Math.floor(clamp(t / 1.2) * str.length)),
+        x, y, 17, i % 3 ? '#74b6c8' : '#b7a1eb');
+    });
+    ctx.restore();
+
+    // Перспективная плоскость.
+    ctx.save();
+    ctx.globalAlpha *= .26 * build;
+    const horizon = 1280;
+    for (let i = -7; i <= 7; i++) {
+      line(540 + i * 29, horizon, 540 + i * 240, H, '#298b9c', 1);
+    }
+    for (let i = 0; i < 12; i++) {
+      const p = ((i / 12 + t * .055) % 1);
+      const y = horizon + p * p * 740;
+      line(0, y, W, y, '#298b9c', 1);
+    }
+    ctx.restore();
+
+    glow(540, 875, 460 + build * 140, `rgba(35,217,255,${.06 + build * .10})`);
+    glow(680, 880, 390, `rgba(132,78,255,${.10 * build})`);
+
+    // Орбитальный нейронный каркас.
+    ctx.save();
+    ctx.globalAlpha *= build * (1 - hero * .65);
+    ring(345, t * .32, .7, '#6ceaff');
+    ring(370, -t * .23, .4, '#a98bff');
+    ring(424, t * .12, .24, '#c2faff', 1);
+
+    ctx.translate(540, 875);
+    for (let i = 0; i < 72; i++) {
+      const a = i / 72 * TAU;
+      const r = 400;
+      const length = i % 6 === 0 ? 15 : 5;
+      line(Math.cos(a) * r, Math.sin(a) * r,
+        Math.cos(a) * (r + length), Math.sin(a) * (r + length),
+        i % 6 === 0 ? '#84dce783' : '#84dce72d', 1.5);
+    }
+
+    const points = nodes.map(n => {
+      const a = n.angle + t * .27;
+      return {
+        x: Math.cos(a) * n.radius,
+        y: Math.sin(a) * n.radius * .78,
+        z: n.z
+      };
+    });
+
+    points.forEach((p, i) => {
+      points.forEach((q, j) => {
+        if (j <= i || (i * 7 + j * 3) % 9 > 1) return;
+        line(p.x, p.y, q.x, q.y, '#7aeaff22', 1);
+      });
+      ctx.fillStyle = i % 4 === 0 ? VIOLET : CYAN;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2 + p.z * 3, 0, TAU);
+      ctx.fill();
+    });
+
+    // Центральная «искра»: объёмный вращающийся ромб.
+    const core = (1 - hero) * (.6 + build * .4);
+    ctx.globalAlpha *= core;
+    ctx.rotate(t * .45);
+    for (let i = 0; i < 5; i++) {
+      const r = 75 + i * 18 + Math.sin(t * 3 + i) * 8;
+      ctx.rotate(.19);
+      ctx.strokeStyle = i % 2 ? '#b7a1ff' : '#a1faff';
+      ctx.lineWidth = i === 0 ? 3 : 1;
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = CYAN;
+      ctx.strokeRect(-r / 2, -r / 2, r, r);
+    }
+    ctx.restore();
+
+    // Радиальные треки ускоряются перед ударом.
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = envelope * build * (1 - hero * .7);
+    particles.forEach(p => {
+      const progress = (p.phase + t * .14 * p.speed) % 1;
+      const r = p.radius + progress * 450 + hit * 120;
+      const a = p.angle + t * .055;
+      const length = p.length * (1 + build * 2) * (1 - hero * .65);
+      line(540 + Math.cos(a) * r, 875 + Math.sin(a) * r * 1.5,
+        540 + Math.cos(a) * (r + length),
+        875 + Math.sin(a) * (r + length) * 1.5, p.color, 1.5);
+    });
+    ctx.restore();
+
+    // Кольцевая ударная волна.
+    if (t > 1.72 && t < 2.65) {
+      const p = clamp((t - 1.72) / .93);
+      ctx.save();
+      ctx.globalAlpha = envelope * (1 - p) * .65;
+      ctx.strokeStyle = '#a5faff';
+      ctx.lineWidth = 2 + 8 * (1 - p);
+      ctx.beginPath();
+      ctx.arc(540, 875, 70 + out(p) * 1140, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Горизонтальный световой разрез.
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = envelope * (.2 * hero + pulse * .9);
+    const beam = ctx.createLinearGradient(65, 0, 1015, 0);
+    beam.addColorStop(0, '#4afaff00');
+    beam.addColorStop(.5, '#d8ffff');
+    beam.addColorStop(1, '#4afaff00');
+    ctx.fillStyle = beam;
+    ctx.shadowColor = CYAN;
+    ctx.shadowBlur = 30;
+    ctx.fillRect(65, 989, 950, 2 + pulse * 5);
+    ctx.restore();
+
+    // Название: быстрый глитч-сбор, затем чистая читаемая фиксация.
+    if (t >= 1.80) {
+      const entrance = out((t - 1.8) / .52);
+      const jitter = t < 2.18 ? (1 - entrance) : 0;
+      const accent = t > 3.46 && t < 3.54 ? .11 : 0;
+      const glitch = Math.max(jitter, accent);
+      ctx.save();
+      ctx.globalAlpha = envelope * smooth(1.8, 1.98, t);
+      ctx.translate(540, 893);
+      const zoom = 1.16 - .16 * entrance;
+      ctx.scale(zoom, zoom);
+      ctx.translate(-540, -150);
+
+      if (glitch > .005) {
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha *= .38;
+        ctx.drawImage(title, -20 * glitch, 3);
+        ctx.drawImage(title, 26 * glitch, -3);
+        ctx.globalAlpha = envelope * smooth(1.8, 1.98, t);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+
+      for (let y = 0; y < 300; y += 12) {
+        const n = Math.sin(y * 4.1 + Math.floor(t * 26) * 2.7);
+        const dx = glitch * n * 100;
+        ctx.drawImage(title, 0, y, 1080, 12, dx, y, 1080, 12);
+      }
+      ctx.restore();
+
+      const sub = smooth(2.06, 2.5, t);
+      ctx.save();
+      ctx.globalAlpha = envelope * sub;
+      spaced('AI Native', 540, 1088 + (1 - sub) * 24, 58, 9, '#e5faff');
+      line(360, 1163, 720, 1163, '#70edff55');
+      spaced('ИДЕЯ  →  КОД  →  БУДУЩЕЕ', 540, 1222, 20, 3.8, '#86a5b3');
+      ctx.restore();
+
+      // Маленькие маркеры ограничивают зону бренда.
+      ctx.save();
+      ctx.globalAlpha = envelope * hero * .65;
+      [[80, 763, 1, 1], [1000, 763, -1, 1],
+       [80, 1130, 1, -1], [1000, 1130, -1, -1]].forEach(([x, y, dx, dy]) => {
+        line(x, y, x + dx * 22, y, CYAN, 2);
+        line(x, y, x, y + dy * 22, CYAN, 2);
+      });
+      ctx.restore();
+    }
+
+    // Один короткий световой пик на переходе, без стробоскопа.
+    ctx.globalAlpha = pulse * .27;
+    ctx.fillStyle = '#d4ffff';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.globalAlpha = envelope;
+    text('HUMAN × MACHINE', 540, 1602, 20, '#8ba6b3', 'center');
+    spaced('BUILD DIFFERENT', 540, 1650, 14, 5, '#526e7b');
+
+    // Нижний пятисекундный таймлайн.
+    const left = 90, top = 1744, gap = 9, bar = (900 - gap * 4) / 5;
+    for (let i = 0; i < 5; i++) {
+      ctx.fillStyle = '#183039';
+      ctx.fillRect(left + i * (bar + gap), top, bar, 3);
+      ctx.fillStyle = '#8dfaff';
+      ctx.fillRect(left + i * (bar + gap), top, bar * clamp(t - i), 3);
+    }
+    text('VIBE CODING / NEURAL CULTURE', 90, 1784, 14, '#64808d');
+    text(`${Math.min(499, Math.floor(t * 100)).toString().padStart(3, '0')} / 500`,
+      990, 1784, 14, '#64808d', 'right');
+
+    // Тонкая оптическая текстура.
+    ctx.globalAlpha = .045;
+    ctx.fillStyle = '#000';
+    for (let y = 0; y < H; y += 5) ctx.fillRect(0, y, W, 1);
+    ctx.globalAlpha = 1;
+
+    const vignette = ctx.createRadialGradient(540, 930, 420, 540, 930, 1160);
+    vignette.addColorStop(0, '#00000000');
+    vignette.addColorStop(1, '#00000088');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  let origin = performance.now();
+  let request = 0;
+
+  function tick(now) {
+    render(reducedMotion.matches ? 3 : ((now - origin) / 1000) % DURATION);
+    if (!reducedMotion.matches) request = requestAnimationFrame(tick);
+  }
+
+  function restart() {
+    cancelAnimationFrame(request);
+    origin = performance.now();
+    request = requestAnimationFrame(tick);
+  }
+
+  reducedMotion.addEventListener('change', restart);
+  window.addEventListener('resize', () => {
+    if (reducedMotion.matches) render(3);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) cancelAnimationFrame(request);
+    else restart();
+  });
+  restart();
+})();
+</script>
+</body>
+</html>
