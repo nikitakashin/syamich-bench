@@ -1,0 +1,166 @@
+{
+  "updated": "2026-11-10",
+  "reference": "anthropic/claude-opus-5.5",
+  "models": [
+    {
+      "id": "openai/gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 8.0,
+        "заставка": 6.0,
+        "3d-сцена": 10.0
+      },
+      "quality": 8.5,
+      "efficiency": 6.509794144587753,
+      "total": 79.02938243376325,
+      "price": 2.270884,
+      "calls": 8,
+      "seconds": 916.6,
+      "tokens_out": 39765,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-11-10",
+      "duel": null
+    },
+    {
+      "id": "openai/gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 9.0,
+        "заставка": 6.0,
+        "3d-сцена": 4.0
+      },
+      "quality": 7.25,
+      "efficiency": 9.310979857266144,
+      "total": 78.68293957179843,
+      "price": 0.1244645,
+      "calls": 8,
+      "seconds": 284.9,
+      "tokens_out": 23771,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-10-26",
+      "duel": {
+        "reference": "openai/gpt-6.1-terra",
+        "total": 65.75
+      }
+    },
+    {
+      "id": "google/gemini-4-carbon",
+      "name": "Gemini 4 Carbon",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 7.0,
+        "заставка": 7.0,
+        "3d-сцена": 5.0
+      },
+      "quality": 7.25,
+      "efficiency": 8.661158746499598,
+      "total": 76.73347623949878,
+      "price": 0.36445,
+      "calls": 8,
+      "seconds": 553.5,
+      "tokens_out": 34914,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-11-10",
+      "duel": null
+    },
+    {
+      "id": "anthropic/claude-fable-5.2",
+      "name": "Claude Fable 5.2",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 10.0,
+        "заставка": 9.0,
+        "3d-сцена": 9.0
+      },
+      "quality": 9.5,
+      "efficiency": 3.3824826312161402,
+      "total": 76.64744789364842,
+      "price": 7.8892240000000005,
+      "calls": 8,
+      "seconds": 1836.4,
+      "tokens_out": 196012,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-11-10",
+      "duel": null
+    },
+    {
+      "id": "anthropic/claude-opus-5.5",
+      "name": "Claude Opus 5.5",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 6.0,
+        "заставка": 10.0,
+        "3d-сцена": 7.0
+      },
+      "quality": 8.25,
+      "efficiency": 5.0,
+      "total": 72.75,
+      "price": 4.9040108,
+      "calls": 8,
+      "seconds": 1777.7,
+      "tokens_out": 201093,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-10-24",
+      "duel": null
+    },
+    {
+      "id": "anthropic/claude-sonnet-5.5",
+      "name": "Claude Sonnet 5.5",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 5.0,
+        "заставка": 10.0,
+        "3d-сцена": 2.0
+      },
+      "quality": 6.75,
+      "efficiency": 5.474951771888938,
+      "total": 63.674855315666804,
+      "price": 2.877494,
+      "calls": 8,
+      "seconds": 2059.4,
+      "tokens_out": 282963,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-10-26",
+      "duel": {
+        "reference": "openai/gpt-6.1-terra",
+        "total": 48.70461454439777
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3.1-pro",
+      "name": "Kimi K3.1 Pro",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 6.0,
+        "заставка": 7.0,
+        "3d-сцена": 1.0
+      },
+      "quality": 6.0,
+      "efficiency": 5.581267932711515,
+      "total": 58.743803798134536,
+      "price": 1.226148,
+      "calls": 8,
+      "seconds": 2306.3999999999996,
+      "tokens_out": 121270,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-10-24",
+      "duel": null
+    }
+  ]
+}

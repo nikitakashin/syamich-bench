@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07000f">
+  <title>Сямыч Бенч — рейтинг ИИ-моделей</title>
+  <meta name="description" content="Сямыч сравнивает модели на четырёх задачах. Результаты, качество ответов и цена API за весь тест.">
+  <meta property="og:title" content="Сямыч Бенч — рейтинг ИИ-моделей">
+  <meta property="og:description" content="Четыре задачи, оценки Сямыча и цена каждого прогона.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="assets/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#ranking">К рейтингу</a>
+<header class="site-head">
+  <div class="wrap head-inner">
+    <a class="brand" href="#top"><img src="assets/favicon.svg" width="32" height="32" alt=""><span>сямыч<span class="brand-slash">/</span>бенч</span></a>
+    <nav aria-label="Навигация"><a href="#ranking">Рейтинг</a><a href="#method">Методика</a><a class="repo" href="https://github.com/nikitakashin/syamich-bench">GitHub <span aria-hidden="true">↗</span></a></nav>
+  </div>
+</header>
+<main class="wrap" id="top">
+  <section class="hero" aria-labelledby="title">
+    <div class="intro">
+      <a class="channel" href="https://www.youtube.com/@privichka_sozdavat"><span class="channel-mark" aria-hidden="true"></span>AI Native Сямыч</a>
+      <h1 id="title">Сямыч <em>Бенч</em><span class="cursor" aria-hidden="true">_</span></h1>
+      <p>Гоняю ИИ-модели на четырёх задачах. Смотрю, что получилось, сколько пришлось ждать и во сколько обошёлся результат.</p>
+    </div>
+    <figure class="specimen">
+      <figcaption><span><span class="file-icon" aria-hidden="true">▧</span> портрет.svg</span><span>64 × 64</span></figcaption>
+      <div class="samples">
+        <div><img src="assets/claude-opus-5.5.png" width="64" height="64" alt="Пиксельный портрет Сямыча от Claude Opus"><span>Opus</span></div>
+        <div><img src="assets/gpt-6-astra.png" width="64" height="64" alt="Портрет по той же фотографии от GPT-6 Astra"><span>Astra</span></div>
+        <div><img src="assets/claude-fable-5.2.png" width="64" height="64" alt="Версия портрета от Claude Fable"><span>Fable</span></div>
+      </div>
+    </figure>
+  </section>
+
+  <section id="ranking" aria-labelledby="rating-heading">
+    <div class="section-title"><h2 id="rating-heading"><span class="prompt" aria-hidden="true">&gt;</span> Рейтинг моделей</h2>
+      <p class="updated">Обновлено <time id="updated" datetime="2026-11-10">10.11.2026</time></p></div>
+    <div class="results-panel">
+      <div class="tools"><span class="model-count">Моделей <b id="model-count">7</b></span>
+        <div class="sort" role="group" aria-label="Сортировка таблицы"><span class="sort-label">Сортировать по</span>
+          <button type="button" data-sort="total" aria-pressed="true">Итогу <span class="sort-dir" aria-hidden="true">↓</span></button>
+          <button type="button" data-sort="quality" aria-pressed="false">Качеству <span class="sort-dir" aria-hidden="true"></span></button>
+          <button type="button" data-sort="price" aria-pressed="false">Цене <span class="sort-dir" aria-hidden="true"></span></button>
+        </div>
+      </div>
+      <div class="table-area">
+        <table>
+          <caption class="sr">Результаты Сямыч Бенча. Место определяется общим итогом. Выберите модель, чтобы посмотреть оценки по задачам.</caption>
+          <thead><tr><th scope="col" class="rank"><span aria-hidden="true">#</span><span class="sr">Место</span></th><th scope="col">Модель</th>
+            <th scope="col" data-column="total" aria-sort="descending">Итог <small>/ 100</small></th>
+            <th scope="col" data-column="quality">Качество <small>/ 10</small></th><th scope="col" data-column="price">Цена API <small>/ USD</small></th></tr></thead>
+          <!-- results:start -->
+<tbody data-total="79.02938243376325" data-quality="8.5" data-price="2.270884" data-complete="true" data-rank="1">
+<tr class="result-row">
+<td class="rank">01</td>
+<th scope="row"><button class="model" type="button" aria-expanded="false" aria-controls="openai-gpt-6-astra" aria-label="Оценки по задачам · GPT-6 Astra"><span class="logo openai"><img class="vendor-icon" src="assets/icons/openai.svg" alt=""></span><span class="model-text"><strong>GPT-6 Astra</strong><small>OpenAI</small></span><span class="disclosure" aria-hidden="true">›</span></button></th>
+<td class="score"><strong>79,0</strong><span class="meter" aria-hidden="true"><i style="width:79.029%"></i></span></td>
+<td class="quality">8,5</td><td class="price">$2,27</td>
+</tr>
+<tr class="detail" id="openai-gpt-6-astra" hidden><td colspan="5"><dl class="grades"><div><dt>Пальцы</dt><dd>10</dd></div><div><dt>Портрет</dt><dd>8</dd></div><div><dt>Заставка</dt><dd>6</dd></div><div><dt>3D-город</dt><dd>10</dd></div></dl><p>Пальцы угаданы в 5 из 5 ответов. Эффективность относительно Opus — 6,5 из 10. За 8 запросов суммарно — 15 мин 17 с и 39 765 выходных токенов.</p></td></tr>
+</tbody>
+<tbody data-total="78.68293957179843" data-quality="7.25" data-price="0.1244645" data-complete="true" data-rank="2">
+<tr class="result-row">
+<td class="rank">02</td>
+<th scope="row"><button class="model" type="button" aria-expanded="false" aria-controls="openai-gpt-6.1-terra" aria-label="Оценки по задачам · GPT-6.1 Terra"><span class="logo openai"><img class="vendor-icon" src="assets/icons/openai.svg" alt=""></span><span class="model-text"><strong>GPT-6.1 Terra</strong><small>OpenAI</small></span><span class="disclosure" aria-hidden="true">›</span></button></th>
+<td class="score"><strong>78,7</strong><span class="meter" aria-hidden="true"><i style="width:78.683%"></i></span></td>
+<td class="quality">7,25</td><td class="price">$0,12</td>
+</tr>
+<tr class="detail" id="openai-gpt-6.1-terra" hidden><td colspan="5"><dl class="grades"><div><dt>Пальцы</dt><dd>10</dd></div><div><dt>Портрет</dt><dd>9</dd></div><div><dt>Заставка</dt><dd>6</dd></div><div><dt>3D-город</dt><dd>4</dd></div></dl><p>Пальцы угаданы в 5 из 5 ответов. Эффективность относительно Opus — 9,3 из 10. За 8 запросов суммарно — 4 мин 45 с и 23 771 выходных токенов. В исходной дуэли с эталоном GPT-6.1 Terra итог составил 65,8 из 100.</p></td></tr>
+</tbody>
+<tbody data-total="76.73347623949878" data-quality="7.25" data-price="0.36445" data-complete="true" data-rank="3">
+<tr class="result-row">
+<td class="rank">03</td>
+<th scope="row"><button class="model" type="button" aria-expanded="false" aria-controls="google-gemini-4-carbon" aria-label="Оценки по задачам · Gemini 4 Carbon"><span class="logo googlegemini"><img class="vendor-icon" src="assets/icons/googlegemini.svg" alt=""></span><span class="model-text"><strong>Gemini 4 Carbon</strong><small>Google</small></span><span class="disclosure" aria-hidden="true">›</span></button></th>
+<td class="score"><strong>76,7</strong><span class="meter" aria-hidden="true"><i style="width:76.733%"></i></span></td>
+<td class="quality">7,25</td><td class="price">$0,36</td>
+</tr>
+<tr class="detail" id="google-gemini-4-carbon" hidden><td colspan="5"><dl class="grades"><div><dt>Пальцы</dt><dd>10</dd></div><div><dt>Портрет</dt><dd>7</dd></div><div><dt>Заставка</dt><dd>7</dd></div><div><dt>3D-город</dt><dd>5</dd></div></dl><p>Пальцы угаданы в 5 из 5 ответов. Эффективность относительно Opus — 8,7 из 10. За 8 запросов суммарно — 9 мин 14 с и 34 914 выходных токенов.</p></td></tr>
+</tbody>
+<tbody data-total="76.64744789364842" data-quality="9.5" data-price="7.8892240000000005" data-complete="true" data-rank="4">
+<tr class="result-row">
+<td class="rank">04</td>
+<th scope="row"><button class="model" type="button" aria-expanded="false" aria-controls="anthropic-claude-fable-5.2" aria-label="Оценки по задачам · Claude Fable 5.2"><span class="logo anthropic"><img class="vendor-icon" src="assets/icons/anthropic.svg" alt=""></span><span class="model-text"><strong>Claude Fable 5.2</strong><small>Anthropic</small></span><span class="disclosure" aria-hidden="true">›</span></button></th>
+<td class="score"><strong>76,6</strong><span class="meter" aria-hidden="true"><i style="width:76.647%"></i></span></td>
+<td class="quality">9,5</td><td class="price">$7,89</td>
+</tr>
+<tr class="detail" id="anthropic-claude-fable-5.2" hidden><td colspan="5"><dl class="grades"><div><dt>Пальцы</dt><dd>10</dd></div><div><dt>Портрет</dt><dd>10</dd></div><div><dt>Заставка</dt><dd>9</dd></div><div><dt>3D-город</dt><dd>9</dd></div></dl><p>Пальцы угаданы в 5 из 5 ответов. Эффективность относительно Opus — 3,4 из 10. За 8 запросов суммарно — 30 мин 36 с и 196 012 выходных токенов.</p></td></tr>
+</tbody>
+<tbody data-total="72.75" data-quality="8.25" data-price="4.9040108" data-complete="true" data-rank="5">
+<tr class="result-row">
+<td class="rank">05</td>
+<th scope="row"><button class="model" type="button" aria-expanded="false" aria-controls="anthropic-claude-opus-5.5" aria-label="Оценки по задачам · Claude Opus 5.5"><span class="logo anthropic"><img class="vendor-icon" src="assets/icons/anthropic.svg" alt=""></span><span class="model-text"><strong>Claude Opus 5.5</strong><small>Anthropic</small></span><span class="disclosure" aria-hidden="true">›</span></button></th>
+<td class="score"><strong>72,8</strong><span class="meter" aria-hidden="true"><i style="width:72.750%"></i></span></td>
+<td class="quality">8,25</td><td class="price">$4,90</td>
+</tr>
+<tr class="detail" id="anthropic-claude-opus-5.5" hidden><td colspan="5"><dl class="grades"><div><dt>Пальцы</dt><dd>10</dd></div><div><dt>Портрет</dt><dd>6</dd></div><div><dt>Заставка</dt><dd>10</dd></div><div><dt>3D-город</dt><dd>7</dd></div></dl><p>Пальцы угаданы в 5 из 5 ответов. Эффективность относительно Opus — 5,0 из 10. За 8 запросов суммарно — 29 мин 38 с и 201 093 выходных токенов.</p></td></tr>
+</tbody>
+<tbody data-total="63.674855315666804" data-quality="6.75" data-price="2.877494" data-complete="true" data-rank="6">
+<tr class="result-row">
+<td class="rank">06</td>
+<th scope="row"><button class="model" type="button" aria-expanded="false" aria-controls="anthropic-claude-sonnet-5.5" aria-label="Оценки по задачам · Claude Sonnet 5.5"><span class="logo anthropic"><img class="vendor-icon" src="assets/icons/anthropic.svg" alt=""></span><span class="model-text"><strong>Claude Sonnet 5.5</strong><small>Anthropic</small></span><span class="disclosure" aria-hidden="true">›</span></button></th>
+<td class="score"><strong>63,7</strong><span class="meter" aria-hidden="true"><i style="width:63.675%"></i></span></td>
+<td class="quality">6,75</td><td class="price">$2,88</td>
+</tr>
+<tr class="detail" id="anthropic-claude-sonnet-5.5" hidden><td colspan="5"><dl class="grades"><div><dt>Пальцы</dt><dd>10</dd></div><div><dt>Портрет</dt><dd>5</dd></div><div><dt>Заставка</dt><dd>10</dd></div><div><dt>3D-город</dt><dd>2</dd></div></dl><p>Пальцы угаданы в 5 из 5 ответов. Эффективность относительно Opus — 5,5 из 10. За 8 запросов суммарно — 34 мин 19 с и 282 963 выходных токенов. В исходной дуэли с эталоном GPT-6.1 Terra итог составил 48,7 из 100.</p></td></tr>
+</tbody>
+<tbody data-total="58.743803798134536" data-quality="6.0" data-price="1.226148" data-complete="true" data-rank="7">
+<tr class="result-row">
+<td class="rank">07</td>
+<th scope="row"><button class="model" type="button" aria-expanded="false" aria-controls="moonshotai-kimi-k3.1-pro" aria-label="Оценки по задачам · Kimi K3.1 Pro"><span class="logo moonshotai"><img class="vendor-icon" src="assets/icons/moonshotai.svg" alt=""></span><span class="model-text"><strong>Kimi K3.1 Pro</strong><small>Moonshot AI</small></span><span class="disclosure" aria-hidden="true">›</span></button></th>
+<td class="score"><strong>58,7</strong><span class="meter" aria-hidden="true"><i style="width:58.744%"></i></span></td>
+<td class="quality">6</td><td class="price">$1,23</td>
+</tr>
+<tr class="detail" id="moonshotai-kimi-k3.1-pro" hidden><td colspan="5"><dl class="grades"><div><dt>Пальцы</dt><dd>10</dd></div><div><dt>Портрет</dt><dd>6</dd></div><div><dt>Заставка</dt><dd>7</dd></div><div><dt>3D-город</dt><dd>1</dd></div></dl><p>Пальцы угаданы в 5 из 5 ответов. Эффективность относительно Opus — 5,6 из 10. За 8 запросов суммарно — 38 мин 26 с и 121 270 выходных токенов.</p></td></tr>
+</tbody>
+<!-- results:end -->
+        </table>
+      </div>
+      <p class="panel-note"><span aria-hidden="true">↳</span> Нажми на модель, чтобы увидеть оценки по задачам.</p>
+    </div>
+    <p class="price-note">Цена API — сумма за все сохранённые ответы. Для запусков по подписке указана оценка по тарифам API.</p>
+    <p id="sort-status" class="sr" role="status"></p>
+  </section>
+
+  <section class="method" id="method" aria-labelledby="method-heading">
+    <h2 id="method-heading"><span class="prompt" aria-hidden="true">&gt;</span> Как устроен бенчмарк</h2>
+    <p class="section-intro">Даю моделям одинаковые задания. В первом есть правильный ответ. В остальных трёх я открываю готовую работу и ставлю от 1 до 10 баллов.</p>
+    <div class="task-grid">
+      <article><span class="task-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 15V7a1.5 1.5 0 0 1 3 0v6-9a1.5 1.5 0 0 1 3 0v9-7a1.5 1.5 0 0 1 3 0v7-4a1.5 1.5 0 0 1 3 0v7a6 6 0 0 1-11 3l-4-6a1.6 1.6 0 0 1 2.6-1.8L7 13"/></svg></span><h3>Пальцы</h3><p>Показываю фото руки с шестью пальцами пять раз. Каждый верный ответ даёт два балла. Так видно, стабильно ли модель замечает лишний палец.</p></article>
+      <article><span class="task-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 8V3h5m8 0h5v5m0 8v5h-5M8 21H3v-5"/><path d="M8 9h2m4 0h2m-8 5 2 2h4l2-2"/></svg></span><h3>Портрет</h3><p>Даю своё фото и прошу нарисовать SVG-аватарку на сетке 64 × 64. Смотрю, узнаваемы ли лицо и панама, когда у модели всего 24 цвета.</p></article>
+      <article><span class="task-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="1.5"/><path d="m10 8 5 4-5 4z"/></svg></span><h3>Заставка</h3><p>Прошу сделать пятисекундную заставку для канала в одном HTML-файле. Проверяю в браузере, читается ли «СЯМЫЧ» в кульминации и как зациклена анимация.</p></article>
+      <article><span class="task-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5m-9 5v10"/></svg></span><h3>3D-город</h3><p>Заказываю ночной город на Three.js с пролётом камеры, туманом и летающими машинами. Тут сразу видно, запускается ли код и получилась ли сцена из задания.</p></article>
+    </div>
+    <div class="method-bottom">
+      <article class="formula"><h3>Откуда берётся итог</h3><div class="equation"><b>Итог</b> = 7 × качество + 3 × эффективность</div>
+        <p>Качество — среднее четырёх оценок. Эффективность учитывает цену (50%), время ответа (30%) и выходные токены (20%). В каждой задаче сравниваю средние за запрос с Claude Opus 5.5.</p>
+        <details><summary>Как считаются баллы эффективности</summary><p>Эталон получает 5 из 10. Если модель вдвое дешевле, она получает 7,5 за цену. Если вдвое дороже — 2,5. То же правило действует для времени и токенов.</p><p>Для каждой метрики беру 5 + 2,5 × log₂(эталон / модель), ограничиваю результат диапазоном 0–10 и усредняю по задачам. В общей таблице у всех один эталон. Для участников отдельной дуэли исходный итог указан в строке модели.</p></details>
+      </article>
+      <article class="why"><h3>Почему именно эти тесты</h3><p>За обзоры мне никто не платит. Если гонять каждую модель на сотнях задач и повторять каждый запрос, одни только API-токены съедят весь бюджет выпуска.</p>
+        <p>Поэтому я придумал четыре задачи, которые могу оплатить сам и показать в кадре. На руке можно проверить ответ, портрет можно узнать, а заставку и город — запустить. По ним я могу прикинуть, какую модель возьму для следующего ролика и сколько это будет стоить.</p><span class="signature">— Сямыч</span>
+      </article>
+    </div>
+  </section>
+</main>
+<footer><div class="wrap footer-inner"><span>Сямыч Бенч</span><nav aria-label="Ссылки проекта"><a href="data/results.json">Данные JSON</a><a href="https://www.youtube.com/@privichka_sozdavat">YouTube ↗</a><a href="https://t.me/syamich3912">Telegram ↗</a></nav></div></footer>
+</body>
+</html>
