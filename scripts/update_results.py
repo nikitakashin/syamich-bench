@@ -57,6 +57,46 @@ def display(value, digits=1):
     return f"{value:.{digits}f}".replace(".", ",")
 
 
+def recorded_sum(entries, field):
+    values = [r.get(field) for r in entries]
+    return sum(values) if values and None not in values else None
+
+
+def task_usage(entries):
+    tokens_in = recorded_sum(entries, "tokens_in")
+    tokens_out = recorded_sum(entries, "tokens_out")
+    return {
+        "runs": len(entries),
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "tokens_total": tokens_in + tokens_out if None not in (tokens_in, tokens_out) else None,
+        "cost": recorded_sum(entries, "cost"),
+        "estimated": any(r.get("cost_kind") == "api_estimate" or r.get("via") in ("claude-code", "codex-cli")
+                         for r in entries),
+    }
+
+
+def format_tokens(value):
+    return "—" if value is None else f"{value:,}".replace(",", " ")
+
+
+def render_task(task, score, usage):
+    grade = display(score, 0) if score is None or score == int(score) else display(score)
+    repeat = f' <small>· прогонов {usage["runs"]}</small>' if usage["runs"] > 1 else ""
+    price = "—"
+    if usage["cost"] is not None:
+        amount = display(usage["cost"], 7).rstrip("0").rstrip(",")
+        prefix = "≈ " if usage["estimated"] else ""
+        price = f"{prefix}${amount}"
+    return f'''<div><dt>{TASK_NAMES[task]}{repeat}</dt><dd>
+<strong class="task-score">{grade} <small>/ 10</small></strong>
+<dl class="usage"><div><dt>Токены</dt><dd>{format_tokens(usage["tokens_total"])}</dd></div>
+<div><dt>Вход</dt><dd>{format_tokens(usage["tokens_in"])}</dd></div>
+<div><dt>Выход</dt><dd>{format_tokens(usage["tokens_out"])}</dd></div>
+<div><dt>Цена API</dt><dd>{price}</dd></div></dl>
+</dd></div>'''
+
+
 def export_works(model, by_task, source_root):
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", model) or any(s in (".", "..") for s in model.split("/")):
         raise ValueError(f"Некорректный идентификатор модели: {model}")
@@ -135,11 +175,12 @@ def collect():
         complete = (all(v is not None for v in tasks.values()) and row["total"] is not None
                     and len(by_task["пальцы"]) >= core.FINGER_RUNS)
         models.append(dict(id=m, name=model_name(m), complete=complete, tasks=tasks,
+                           task_usage={t: task_usage(entries) for t, entries in by_task.items()},
                            works=export_works(m, by_task, source_roots[m]),
                            quality=row["Q"], efficiency=row["Eall"], total=row["total"],
                            price=row["spent"] if all(r.get("cost") is not None for r in all_runs) else None,
                            calls=len(all_runs), seconds=sum(r["seconds"] for r in all_runs),
-                           tokens_out=sum(r["tokens_out"] for r in all_runs), fingers=len(by_task["пальцы"]),
+                           tokens_out=recorded_sum(all_runs, "tokens_out"), fingers=len(by_task["пальцы"]),
                            correct=sum(bool(r.get("correct")) for r in by_task["пальцы"]),
                            last=max(r["at"] for r in all_runs)[:10], duel=originals.get(m)))
     return sorted(models, key=lambda m: (not m["complete"], -(m["total"] or 0), m["id"]))
@@ -156,8 +197,7 @@ def render_model(model, rank):
     width = (m["total"] or 0) if m["complete"] else 0
     price = "—" if m["price"] is None else "$" + display(m["price"], 2)
     sub = escape(vendor) if m["complete"] else f'<span class="pending">{size}/4 тестов</span>'
-    tasks = "".join(f'<div><dt>{TASK_NAMES[t]}</dt><dd>{display(v, 0) if v is None or v == int(v) else display(v)}</dd></div>'
-                    for t, v in m["tasks"].items())
+    tasks = "\n".join(render_task(t, score, m["task_usage"][t]) for t, score in m["tasks"].items())
     links = []
     for task, work in m["works"].items():
         title = "Открыть заставку" if task == "заставка" else "Открыть 3D-город"
@@ -174,7 +214,7 @@ def render_model(model, rank):
                          for work in m["works"].values() if "note" in work)
     notes = [f'Пальцы угаданы в {m["correct"]} из {m["fingers"]} ответов. Эффективность относительно Opus — {display(m["efficiency"])} из 10.']
     minutes, seconds = divmod(round(m["seconds"]), 60)
-    tokens = f"{m['tokens_out']:,}".replace(",", " ")
+    tokens = format_tokens(m["tokens_out"])
     notes.append(f'За {m["calls"]} запросов суммарно — {minutes} мин {seconds} с и {tokens} выходных токенов.')
     if not m["complete"]:
         notes.append(f'Предварительный итог — {display(m["total"])}. Качество посчитано по выставленным оценкам, цена — по всем сохранённым ответам.')

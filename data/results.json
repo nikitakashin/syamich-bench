@@ -12,6 +12,40 @@
         "заставка": 6.0,
         "3d-сцена": 10.0
       },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 30905,
+          "tokens_out": 340,
+          "tokens_total": 31245,
+          "cost": 0.157858,
+          "estimated": true
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 6570,
+          "tokens_out": 18175,
+          "tokens_total": 24745,
+          "cost": 0.937586,
+          "estimated": true
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 5645,
+          "tokens_out": 5669,
+          "tokens_total": 11314,
+          "cost": 0.3399,
+          "estimated": true
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 5649,
+          "tokens_out": 15581,
+          "tokens_total": 21230,
+          "cost": 0.83554,
+          "estimated": true
+        }
+      },
       "works": {
         "заставка": {
           "url": "works/openai/gpt-6-astra/intro.html"
@@ -41,6 +75,40 @@
         "портрет": 9.0,
         "заставка": 6.0,
         "3d-сцена": 4.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 3755,
+          "tokens_out": 344,
+          "tokens_total": 4099,
+          "cost": 0.005475,
+          "estimated": false
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1137,
+          "tokens_out": 8697,
+          "tokens_total": 9834,
+          "cost": 0.0449055,
+          "estimated": false
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 216,
+          "tokens_out": 5494,
+          "tokens_total": 5710,
+          "cost": 0.027686,
+          "estimated": false
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 218,
+          "tokens_out": 9236,
+          "tokens_total": 9454,
+          "cost": 0.046398,
+          "estimated": false
+        }
       },
       "works": {
         "заставка": {
@@ -75,6 +143,40 @@
         "заставка": 7.0,
         "3d-сцена": 5.0
       },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 5875,
+          "tokens_out": 1020,
+          "tokens_total": 6895,
+          "cost": 0.02195,
+          "estimated": false
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1278,
+          "tokens_out": 5207,
+          "tokens_total": 6485,
+          "cost": 0.054626,
+          "estimated": false
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 250,
+          "tokens_out": 17966,
+          "tokens_total": 18216,
+          "cost": 0.18016,
+          "estimated": false
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 252,
+          "tokens_out": 10721,
+          "tokens_total": 10973,
+          "cost": 0.107714,
+          "estimated": false
+        }
+      },
       "works": {
         "заставка": {
           "url": "works/google/gemini-4-carbon/intro.html"
@@ -104,6 +206,40 @@
         "портрет": 10.0,
         "заставка": 9.0,
         "3d-сцена": 9.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 4215,
+          "tokens_out": 1632,
+          "tokens_total": 5847,
+          "cost": 0.099,
+          "estimated": false
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1256,
+          "tokens_out": 46204,
+          "tokens_total": 47460,
+          "cost": 1.858208,
+          "estimated": false
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 311,
+          "tokens_out": 57874,
+          "tokens_total": 58185,
+          "cost": 2.317448,
+          "estimated": false
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 311,
+          "tokens_out": 90302,
+          "tokens_total": 90613,
+          "cost": 3.614568,
+          "estimated": false
+        }
       },
       "works": {
         "заставка": {
@@ -135,6 +271,40 @@
         "заставка": 10.0,
         "3d-сцена": 7.0
       },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 7408,
+          "tokens_out": 870,
+          "tokens_total": 8278,
+          "cost": 0.076624,
+          "estimated": true
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1898,
+          "tokens_out": 22956,
+          "tokens_total": 24854,
+          "cost": 0.47429600000000005,
+          "estimated": true
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 859,
+          "tokens_out": 52164,
+          "tokens_total": 53023,
+          "cost": 1.050144,
+          "estimated": true
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 101785,
+          "tokens_out": 125103,
+          "tokens_total": 226888,
+          "cost": 3.3029468,
+          "estimated": true
+        }
+      },
       "works": {
         "заставка": {
           "url": "works/anthropic/claude-opus-5.5/intro.html"
@@ -164,6 +334,40 @@
         "портрет": 5.0,
         "заставка": 10.0,
         "3d-сцена": 2.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 7426,
+          "tokens_out": 1613,
+          "tokens_total": 9039,
+          "cost": 0.045814,
+          "estimated": true
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1898,
+          "tokens_out": 37307,
+          "tokens_total": 39205,
+          "cost": 0.380658,
+          "estimated": true
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 863,
+          "tokens_out": 59463,
+          "tokens_total": 60326,
+          "cost": 0.598078,
+          "estimated": true
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 1788,
+          "tokens_out": 184580,
+          "tokens_total": 186368,
+          "cost": 1.852944,
+          "estimated": true
+        }
       },
       "works": {
         "заставка": {
@@ -199,6 +403,40 @@
         "портрет": 6.0,
         "заставка": 7.0,
         "3d-сцена": 1.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 4665,
+          "tokens_out": 4580,
+          "tokens_total": 9245,
+          "cost": 0.05513,
+          "estimated": false
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1326,
+          "tokens_out": 36908,
+          "tokens_total": 38234,
+          "cost": 0.371732,
+          "estimated": false
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 363,
+          "tokens_out": 32733,
+          "tokens_total": 33096,
+          "cost": 0.328056,
+          "estimated": false
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 370,
+          "tokens_out": 47049,
+          "tokens_total": 47419,
+          "cost": 0.47123,
+          "estimated": false
+        }
       },
       "works": {
         "заставка": {
