@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="color-scheme" content="dark"/>
+<title>NEON DISTRICT — ночной киберпанк-город</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000}
+  canvas{display:block;width:100%;height:100%}
+  /* кинематографические чёрные полосы */
+  .bar{position:fixed;left:0;right:0;height:7vh;background:#000;z-index:5;pointer-events:none}
+  #barT{top:0}#barB{bottom:0}
+  #title{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    z-index:6;pointer-events:none;font-family:'Segoe UI',system-ui,sans-serif;color:#e8f4ff;opacity:0;
+    animation:title 9s ease forwards 1.2s}
+  #title h1{font-weight:200;font-size:clamp(28px,5vw,64px);letter-spacing:.55em;margin:0;text-indent:.55em;
+    text-shadow:0 0 24px rgba(0,229,255,.55),0 0 60px rgba(255,45,149,.3)}
+  #title p{font-weight:300;letter-spacing:.4em;font-size:clamp(10px,1.3vw,14px);color:#7fdfff;opacity:.8}
+  @keyframes title{0%{opacity:0;transform:scale(1.04)}12%{opacity:1}70%{opacity:1}100%{opacity:0;transform:scale(1)}}
+  #hud{position:fixed;left:24px;bottom:calc(7vh + 14px);z-index:6;font:11px/1.7 ui-monospace,Consolas,monospace;
+    color:#9adfff;opacity:.45;letter-spacing:.18em;pointer-events:none}
+  #boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#3fa9c9;
+    font:12px ui-monospace,monospace;letter-spacing:.35em;z-index:4}
+</style>
+</head>
+<body>
+<div class="bar" id="barT"></div><div class="bar" id="barB"></div>
+<div id="title"><h1>NEON DISTRICT</h1><p>НОЧНОЙ ГОРОД · СЕКТОР 07</p></div>
+<div id="hud">SECTOR 07 // 03:47 AM<br>ДОЖДЬ 92% · +4°C · ЦИКЛ ПАТРУЛЯ</div>
+<div id="boot">ЗАГРУЗКА СЕТКИ…</div>
+
+<script>
+  setTimeout(function(){
+    if(!window.__booted){var b=document.getElementById('boot');
+      if(b)b.textContent='НЕ УДАЛОСЬ ЗАГРУЗИТЬ THREE.JS — ПРОВЕРЬТЕ ИНТЕРНЕТ';}
+  },9000);
+</script>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   БАЗА: рендерер, сцена, разделяемые uniform'ы
+============================================================ */
+const boot = document.getElementById('boot');
+let renderer;
+try{
+  renderer = new THREE.WebGLRenderer({ antialias:false, powerPreference:'high-performance' });
+}catch(e){ boot.textContent = 'WEBGL2 НЕДОСТУПЕН В ЭТОМ БРАУЗЕРЕ'; throw e; }
+const hasFloat = renderer.extensions.has('EXT_color_buffer_float');
+renderer.toneMapping = THREE.NoToneMapping;      // тонмаппинг делаем сами в пост-обработке
+renderer.autoClear = false;
+renderer.setClearColor(0x000000, 1);
+document.body.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(58, 1, 0.5, 1600);
+
+const FOG_COLOR = new THREE.Color(0x0b0716);
+const U = {
+  uTime:       { value: 0 },
+  uFogColor:   { value: FOG_COLOR },
+  uFogDensity: { value: 0.0055 },
+  uCamPos:     { value: new THREE.Vector3() }
+};
+
+/* детерминированный ГПСЧ — город всегда одинаковый */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+const rng = mulberry32(20771113);
+const R   = (a,b)=>a+rng()*(b-a);
+const pick= a=>a[Math.floor(rng()*a.length)];
+
+const CELL = 30, RING = 62;
+const NEON = [0xff2d95,0x00e5ff,0xff9d00,0xb04dff,0x39ff9e,0xff3355,0xffe6a8].map(h=>new THREE.Color(h));
+const WINPAL = [0xffd9a0,0xcfeaff,0x86f0ff,0xff9ad5,0xffb36b].map(h=>new THREE.Color(h));
+
+/* ============================================================
+   ОБЩИЙ GLSL
+============================================================ */
+const COMMON = `
+float hash11(float p){p=fract(p*.1031);p*=p+33.33;p*=p+p;return fract(p);}
+float hash12(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
+vec2  hash22(vec2 p){vec3 p3=fract(vec3(p.xyx)*vec3(.1031,.103,.0973));p3+=dot(p3,p3.yzx+33.33);return fract((p3.xx+p3.yz)*p3.zy);}
+float vnoise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);
+  return mix(mix(hash12(i),hash12(i+vec2(1.,0.)),u.x),mix(hash12(i+vec2(0.,1.)),hash12(i+vec2(1.,1.)),u.x),u.y);}
+float fbm(vec2 p){float a=.5,s=0.;for(int i=0;i<4;i++){s+=a*vnoise(p);p=p*2.03+17.7;a*=.5;}return s;}
+float ss(float a,float b,float x){return smoothstep(a,b,x);}
+float fs(float a,float b,float x){return 1.-smoothstep(a,b,x);}
+vec3 applyFog(vec3 c,float d,vec3 fc,float fd){float f=1.-exp(-fd*fd*d*d);return mix(c,fc,f);}
+float fogKeep(float d,float fd){return exp(-fd*fd*d*d);}
+`;
+/* псевдо-иероглиф из случайных штрихов */
+const GLYPH = `
+float bar(float x,float c,float w,float aa){return 1.-smoothstep(w,w+aa,abs(x-c));}
+float span(float x,float lo,float hi,float aa){return smoothstep(lo-aa,lo+aa,x)*(1.-smoothstep(hi-aa,hi+aa,x));}
+float glyph(vec2 p,float s){
+  float aa=max(fwidth(p.x)+fwidth(p.y),.015);
+  float ink=0.;
+  float y1=.25+.5*hash11(s+1.);
+  ink=max(ink,bar(p.y,y1,.055,aa)*span(p.x,.18,.82,aa));
+  if(hash11(s+2.)>.45){float y2=.2+.6*hash11(s+3.);ink=max(ink,bar(p.y,y2,.055,aa)*span(p.x,.22,.78,aa));}
+  float x1=.3+.4*hash11(s+4.);
+  ink=max(ink,bar(p.x,x1,.055,aa)*span(p.y,.16,.84,aa));
+  if(hash11(s+5.)>.55){float x2=.25+.5*hash11(s+6.);ink=max(ink,bar(p.x,x2,.055,aa)*span(p.y,.25,.75,aa));}
+  if(hash11(s+7.)>.8){
+    float bx=bar(p.x,.5,.3,aa)-bar(p.x,.5,.22,aa);
+    float by=bar(p.y,.5,.32,aa)-bar(p.y,.5,.24,aa);
+    ink=max(ink,clamp(max(bx*span(p.y,.18,.82,aa),by*span(p.x,.2,.8,aa)),0.,1.));
+  }
+  return ink*span(p.x,.1,.9,aa)*span(p.y,.1,.9,aa);
+}`;
+
+/* ============================================================
+   ПОСТ-ОБРАБОТКА: свой bloom + кинематографический грейд
+   (без внешних аддонов — только сам three.js)
+============================================================ */
+const postScene = new THREE.Scene();
+const postCam   = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const fsGeo = new THREE.BufferGeometry();
+fsGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1,-1,0, 3,-1,0, -1,3,0]),3));
+fsGeo.setAttribute('uv',       new THREE.BufferAttribute(new Float32Array([0,0, 2,0, 0,2]),2));
+const fsMesh = new THREE.Mesh(fsGeo); fsMesh.frustumCulled=false; postScene.add(fsMesh);
+function blit(mat,target,clear=true){
+  fsMesh.material=mat; renderer.setRenderTarget(target);
+  if(clear) renderer.clear();
+  renderer.render(postScene,postCam);
+}
+const VS_POST = `varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}`;
+function postMat(fs,uniforms,additive=false){
+  return new THREE.ShaderMaterial({uniforms,vertexShader:VS_POST,fragmentShader:fs,
+    depthTest:false,depthWrite:false,blending:additive?THREE.AdditiveBlending:THREE.NormalBlending,
+    transparent:addive});
+}
+function makeRT(w,h,depth=true,samples=0){
+  const rt=new THREE.WebGLRenderTarget(w,h,{
+    type:hasFloat?THREE.HalfFloatType:THREE.UnsignedByteType,
+    minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,
+    depthBuffer:depth,stencilBuffer:false});
+  rt.samples=samples; return rt;
+}
+const rtScene = makeRT(2,2,true,4);            // HDR + MSAA
+const rtRefl  = makeRT(2,2,true,0);            // отражение (половина разрешения)
+const rtAccum = makeRT(2,2,false,0);
+const levels = [];
+for(let i=0;i<4;i++) levels.push({a:makeRT(2,2,false),b:makeRT(2,2,false),tex:new THREE.Vector2(),w:[.55,.42,.32,.26][i]});
+
+const brightMat = postMat(`
+uniform sampler2D tSrc;uniform float uThresh,uKnee;varying vec2 vUv;
+void main(){vec3 c=texture2D(tSrc,vUv).rgb;float br=max(c.r,max(c.g,c.b));
+float soft=clamp(br-uThresh+uKnee,0.,2.*uKnee);soft=soft*soft/(4.*uKnee+1e-4);
+float w=max(br-uThresh,soft)/max(br,1e-4);gl_FragColor=vec4(c*w,1.);}`,
+{tSrc:{value:null},uThresh:{value:hasFloat?1.0:.72},uKnee:{value:.5}});
+
+const blurMat = postMat(`
+uniform sampler2D tSrc;uniform vec2 uDir;varying vec2 vUv;
+void main(){vec3 s=texture2D(tSrc,vUv).rgb*.227027;
+s+=(texture2D(tSrc,vUv+uDir*1.3846).rgb+texture2D(tSrc,vUv-uDir*1.3846).rgb)*.3162162;
+s+=(texture2D(tSrc,vUv+uDir*3.2308).rgb+texture2D(tSrc,vUv-uDir*3.2308).rgb)*.0702703;
+gl_FragColor=vec4(s,1.);}`,
+{tSrc:{value:null},uDir:{value:new THREE.Vector2()}});
+
+const copyMat = postMat(`uniform sampler2D tSrc;varying vec2 vUv;
+void main(){gl_FragColor=vec4(texture2D(tSrc,vUv).rgb,1.);}`,{tSrc:{value:null}});
+
+const accumMat = postMat(`uniform sampler2D tSrc;uniform float uW;uniform vec3 uTint;varying vec2 vUv;
+void main(){gl_FragColor=vec4(texture2D(tSrc,vUv).rgb*uW*uTint,1.);}`,
+{tSrc:{value:null},uW:{value:1},uTint:{value:new THREE.Vector3(1,1,1)}},true);
+
+const finalMat = postMat(`
+uniform sampler2D tScene,tBloom;uniform float uTime,uExposure,uBloomStr;uniform vec2 uRes;varying vec2 vUv;
+${COMMON}
+vec3 aces(vec3 x){return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.);}
+void main(){
+  vec2 uv=vUv;vec2 d=uv-.5;float r2=dot(d,d);
+  vec2 ca=d*r2*.006;                                   /* хроматическая аберрация */
+  vec3 c;
+  c.r=texture2D(tScene,uv+ca).r;
+  c.g=texture2D(tScene,uv).g;
+  c.b=texture2D(tScene,uv-ca).b;
+  c+=texture2D(tBloom,uv).rgb*uBloomStr;
+  c*=uExposure;
+  c=aces(c);
+  float l=dot(c,vec3(.2126,.7152,.0722));
+  c=mix(vec3(l),c,1.12);                               /* насыщенность */
+  c+=vec3(.0,.010,.022)*(1.-ss(0.,.45,l));             /* холодные тени */
+  c*=mix(vec3(1.),vec3(1.05,.99,.94),ss(.5,1.,l));     /* тёплые света */
+  c=mix(c,c*c*(3.-2.*c),.22);                          /* мягкий контраст */
+  float vig=fs(.35,1.05,length(d)*1.35);
+  c*=.28+.72*vig;                                      /* виньетка */
+  float g=hash12(uv*uRes+vec2(fract(uTime*13.7)*911.,fract(uTime*7.3)*577.))-.5;
+  c+=g*.05*(.35+.65*(1.-l));                           /* плёночное зерно */
+  c=clamp(c,0.,1.);
+  vec3 s=mix(1.055*pow(c,vec3(1./2.4))-.055,c*12.92,step(c,vec3(.0031308)));
+  gl_FragColor=vec4(s,1.);
+}`,
+{tScene:{value:null},tBloom:{value:null},uTime:U.uTime,uExposure:{value:1.15},
+ uBloomStr:{value:.85},uRes:{value:new THREE.Vector2()}});
+
+function blurPair(L,scale=1){
+  blurMat.uniforms.tSrc.value=L.a.texture; blurMat.uniforms.uDir.value.set(L.tex.x*scale,0); blit(blurMat,L.b);
+  blurMat.uniforms.tSrc.value=L.b.texture; blurMat.uniforms.uDir.value.set(0,L.tex.y*scale); blit(blurMat,L.a);
+}
+function accum(src,w,tint){
+  accumMat.uniforms.tSrc.value=src.texture;
+  accumMat.uniforms.uW.value=w;
+  accumMat.uniforms.uTint.value.set(tint?tint[0]:1,tint?tint[1]:1,tint?tint[2]:1);
+  blit(accumMat,rtAccum,false);
+}
+
+/* ============================================================
+   НЕБО: градиент, звёзды, луна, облака, зарево города
+============================================================ */
+const skyMat = new THREE.ShaderMaterial({
+  side:THREE.BackSide,
+  uniforms:{ uTime:U.uTime, uFogColor:U.uFogColor,
+    uZenith:{value:new THREE.Color(0x030409)}, uHorizon:{value:new THREE.Color(0x1a0f2e)},
+    uGlow:{value:new THREE.Color(0xff2d95)},   uMoonCol:{value:new THREE.Color(0xff8a5c)},
+    uMoonDir:{value:new THREE.Vector3(-.62,.17,-.45).normalize()} },
+  vertexShader:`varying vec3 vWorld;void main(){vec4 wp=modelMatrix*vec4(position,1.);vWorld=wp.xyz;
+    gl_Position=projectionMatrix*viewMatrix*wp;}`,
+  fragmentShader:`
+  uniform float uTime;uniform vec3 uFogColor,uZenith,uHorizon,uGlow,uMoonCol,uMoonDir;varying vec3 vWorld;
+  ${COMMON}
+  void main(){
+    vec3 d=normalize(vWorld);float h=d.y;
+    vec3 col=mix(uHorizon,uZenith,ss(-.05,.45,h));
+    float az=atan(d.z,d.x);
+    col+=uGlow*pow(max(1.-abs(h+.02)*4.,0.),3.)*(.30+.22*sin(az*3.+1.7))*.35;   /* зарево */
+    float md=dot(d,uMoonDir);
+    float cl=ss(.5,.78,fbm(vec2(az*2.,h*6.)*2.+uTime*.008))*fs(.08,.4,abs(h-.16));
+    if(h>.02){                                                                  /* звёзды */
+      vec2 sp=d.xz/(d.y+.4)*140.;vec2 sid=floor(sp),sf=fract(sp);
+      float sh=hash12(sid);
+      if(sh>.992){vec2 sc=hash22(sid)*.6+.2;float sd=length(sf-sc);
+        float tw=.6+.4*sin(uTime*(1.+sh*3.)+sh*40.);
+        col+=vec3(.8,.9,1.)*fs(0.,.09,sd)*tw*.8*ss(.02,.2,h)*(1.-cl);}
+    }
+    float disc=ss(cos(.052),cos(.046),md);                                      /* луна */
+    float maria=.7+.4*fbm(d.xy*46.+3.7);
+    col+=uMoonCol*disc*1.7*maria*(1.-cl*.85);
+    col+=uMoonCol*(pow(max(md,0.),300.)*.5+pow(max(md,0.),40.)*.12);            /* гало */
+    vec3 cloudCol=mix(col*.55,uGlow*.22,.5)+uMoonCol*pow(max(md,0.),8.)*.35;    /* облака */
+    col=mix(col,cloudCol,cl*.7);
+    col=mix(col,uFogColor,fs(-.06,.02,h));                                      /* стык с туманом */
+    gl_FragColor=vec4(col,1.);
+  }`
+});
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(900,48,24),skyMat));
+
+/* ============================================================
+   ГОРОД: генерация зданий (кольцевой проспект свободен для камеры)
+============================================================ */
+const buildings=[];
+function addBuilding(x,z,w,d,h,rot=0){
+  const seed=rng()*100, accent=pick(NEON), style=rng()<.45?1:(rng()<.5?2:0);
+  buildings.push({x,z,w,d,h,rot,seed,accent,style,dist:Math.hypot(x,z)});
+}
+for(let gx=-10;gx<=10;gx++)for(let gz=-10;gz<=10;gz++){
+  const cx=gx*CELL+R(-2,2), cz=gz*CELL+R(-2,2), dist=Math.hypot(cx,cz);
+  if(dist>310||dist<20) continue;
+  const n=rng()<.3?2:1;
+  for(let k=0;k<n;k++){
+    const w=R(9,20)/(n>1?1.4:1), d=R(9,20)/(n>1?1.4:1);
+    const ox=n>1?(k?7:-7):0, oz=n>1?R(-3,3):0;
+    const x=cx+ox,z=cz+oz,dd=Math.hypot(x,z);
+    const hd=Math.hypot(w/2,d/2);
+    if(dd-hd<RING+10 && dd+hd>RING-10) continue;      /* не лезем на проспект */
+    let h=R(18,55);
+    const nearRing=Math.abs(dd-RING)<45;
+    if(nearRing) h+=R(25,75);
+    if(dd<48) h=Math.max(h,R(55,120));
+    addBuilding(x,z,w,d,Math.min(h,150));
+  }
+}
+for(let i=0;i<90;i++){                                /* дальний скайлайн */
+  const a=R(0,Math.PI*2), r=R(300,430);
+  addBuilding(Math.cos(a)*r,Math.sin(a)*r,R(18,34),R(18,34),R(50,190),R(0,Math.PI));
+}
+const megaAngles=[.4,1.9,3.6,5.0];                    /* мегабашни в центре */
+const megas=[];
+for(const a of megaAngles){
+  const r=R(5,15), b={x:Math.cos(a)*r,z:Math.sin(a)*r,w:R(14,19),d:R(14,19),h:R(160,235),
+    rot:0,seed:rng()*100,accent:pick([NEON[0],NEON[1],NEON[3]]),style:2,dist:r};
+  buildings.push(b); megas.push(b);
+}
+
+/* --- инстансированные здания с процедурными окнами --- */
+const bGeo=new THREE.BoxGeometry(1,1,1);
+const bCount=buildings.length;
+const bSeed=new Float32Array(bCount), bAcc=new Float32Array(bCount*3), bStyle=new Float32Array(bCount);
+const bMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:U.uTime,uFogColor:U.uFogColor,uFogDensity:U.uFogDensity,uWinPal:{value:WINPAL}},
+  vertexShader:`
+  attribute float aSeed;attribute vec3 aAccent;attribute float aStyle;
+  varying vec3 vLocal,vN,vScale,vAccent;varying float vSeed,vStyle,vFog;
+  void main(){
+    vScale=vec3(length(instanceMatrix[0].xyz),length(instanceMatrix[1].xyz),length(instanceMatrix[2].xyz));
+    vLocal=position*vScale;vN=normal;vSeed=aSeed;vAccent=aAccent;vStyle=aStyle;
+    vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.);
+    vec4 mv=viewMatrix*wp;vFog=-mv.z;gl_Position=projectionMatrix*mv;
+  }`,
+  fragmentShader:`
+  uniform float uTime,uFogDensity;uniform vec3 uFogColor,uWinPal[5];
+  varying vec3 vLocal,vN,vScale,vAccent;varying float vSeed,vStyle,vFog;
+  ${COMMON}
+  void main(){
+    vec3 col;float y=vLocal.y+vScale.y*.5;
+    if(abs(vN.y)>.5){
+      col=vec3(.008,.01,.014)*(.7+.5*hash12(floor(vLocal.xz*2.)+vSeed));
+    }else{
+      vec2 uv=abs(vN.x)>.5?vec2(vLocal.z,y):vec2(vLocal.x,y);
+      vec2 cell=vec2(2.05,2.75);
+      vec2 id=floor(uv/cell),f=fract(uv/cell),fw=fwidth(uv/cell);
+      float aa=max(fw.x,fw.y)*1.2;
+      vec2 wl=vec2(.16,.2),wh=vec2(.84,.8);
+      vec2 win=smoothstep(wl-aa,wl+aa,f)*(1.-smoothstep(wh-aa,wh+aa,f));
+      float w=win.x*win.y;
+      float litRatio=.34+.25*hash11(vSeed);
+      float h1=hash12(id+vSeed*17.7);
+      float lit=step(h1,litRatio);
+      float h2=hash12(id*1.7+vSeed*3.1);
+      vec3 wc=h2<.55?uWinPal[0]:h2<.8?uWinPal[1]:h2<.92?uWinPal[2]:h2<.97?uWinPal[3]:uWinPal[4];
+      float inten=.8+2.2*hash12(id+5.7+vSeed);
+      float fl=1.;
+      if(h1>.30&&h1<.315) fl=.4+.6*step(.5,fract(uTime*(1.+3.*h2)+h2*7.));
+      float blinds=h2>.82?(.55+.45*step(.5,fract(f.y*5.))):1.;
+      vec3 winCol=wc*inten*lit*fl*blinds;
+      float lod=ss(.25,.8,max(fw.x,fw.y));                       /* антиалиасинг вдали */
+      vec3 avg=(uWinPal[0]*.55+uWinPal[1]*.3+uWinPal[4]*.15)*1.2*litRatio;
+      winCol=mix(winCol,avg,lod);
+      vec3 base=vec3(.010,.013,.022)*(.6+.5*vnoise(uv*.7+vSeed));
+      base*=.55+.45*ss(0.,.25,f.x)*fs(.75,1.,f.x);
+      base+=vec3(.05,.012,.05)*exp(-y/16.)*.5*(.5+.5*sin(vSeed*7.));
+      base+=vec3(.0,.03,.05)*exp(-y/22.)*.5;
+      float crown=y>vScale.y-1.1?1.:0.;
+      float edge=0.;
+      if(vStyle>1.5){
+        float ex=abs(vN.x)>.5?abs(vLocal.z):abs(vLocal.x);
+        float hf=abs(vN.x)>.5?vScale.z*.5:vScale.x*.5;
+        edge=step(hf-.22,ex);
+      }
+      vec3 accent=vAccent*(crown*(vStyle>.5?2.6:0.)+edge*1.4);   /* неоновый контур */
+      float shop=fs(3.2,4.2,y)*step(.25,hash11(vSeed*3.7));      /* витрины у земли */
+      float sp2=ss(.1,.2,fract(uv.x/3.4))*fs(.8,.95,fract(uv.x/3.4));
+      vec3 shopCol=mix(vec3(1.,.55,.2),vec3(1.,.2,.6),hash11(vSeed*8.1))*shop*sp2*1.1;
+      col=base*(1.-w*.85)+winCol*w+accent+shopCol;
+      col+=vec3(.012,.016,.03)*max(dot(vN,normalize(vec3(-.4,.3,-.5))),0.);
+    }
+    col=applyFog(col,vFog,uFogColor,uFogDensity);
+    gl_FragColor=vec4(col,1.);
+  }`
+});
+const bMesh=new THREE.InstancedMesh(bGeo,bMat,bCount);
+{
+  const m=new THREE.Matrix4(),p=new THREE.Vector3(),q=new THREE.Quaternion(),s=new THREE.Vector3(),Y=new THREE.Vector3(0,1,0);
+  buildings.forEach((b,i)=>{
+    q.setFromAxisAngle(Y,b.rot); p.set(b.x,b.h/2,b.z); s.set(b.w,b.h,b.d);
+    m.compose(p,q,s); bMesh.setMatrixAt(i,m);
+    bSeed[i]=b.seed; bStyle[i]=b.style;
+    bAcc[i*3]=b.accent.r; bAcc[i*3+1]=b.accent.g; bAcc[i*3+2]=b.accent.b;
+  });
+}
+bGeo.setAttribute('aSeed',  new THREE.InstancedBufferAttribute(bSeed,1));
+bGeo.setAttribute('aAccent',new THREE.InstancedBufferAttribute(bAcc,3));
+bGeo.setAttribute('aStyle', new THREE.InstancedBufferAttribute(bStyle,1));
+bMesh.frustumCulled=false; scene.add(bMesh);
+
+/* ============================================================
+   НЕОНОВЫЕ ВЫВЕСКИ (инстансированные плоскости)
+============================================================ */
+const VS_FLAT=`
+attribute float aSeed;attribute vec3 aColor;
+varying vec2 vUv;varying vec3 vScale,vColor;varying float vSeed,vFog;
+void main(){
+  vScale=vec3(length(instanceMatrix[0].xyz),length(instanceMatrix[1].xyz),1.);
+  vUv=uv;vSeed=aSeed;vColor=aColor;
+  vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.);
+  vec4 mv=viewMatrix*wp;vFog=-mv.z;gl_Position=projectionMatrix*mv;
+}`;
+const signs=[];   // {x,y,z,ry,w,h,color,seed}
+function faceToward(b,dir){ // грань здания, смотрящая в направлении dir
+  if(Math.abs(dir.x)>Math.abs(dir.z)) return dir.x>0?{nx:1,nz:0}:{nx:-1,nz:0};
+  return dir.z>0?{nx:0,nz:1}:{nx:0,nz:-1};
+}
+function addSign(b,f,y,w,h,color){
+  const along=f.nx!==0?b.d:b.w;
+  const off=R(-1,1)*Math.max(0,(along/2-w/2-.5));
+  const x=b.x+f.nx*(b.w/2+.35)+(f.nx!==0?0:off);
+  const z=b.z+f.nz*(b.d/2+.35)+(f.nz!==0?0:off);
+  const ry=f.nx!==0?(f.nx>0?Math.PI/2:-Math.PI/2):(f.nz>0?0:Math.PI);
+  signs.push({x,y,z,ry,w,h,color,seed:rng()*100});
+}
+for(const b of buildings){
+  const dd=b.dist;
+  if(Math.abs(dd-RING)>10 && Math.abs(dd-RING)<48 && b.h>18){
+    const inward=dd>RING?{x:-b.x/dd,z:-b.z/dd}:{x:b.x/dd,z:b.z/dd};
+    const f=faceToward(b,inward);
+    const n=1+(rng()<.5?1:0);
+    for(let k=0;k<n;k++){
+      const h=R(8,16), w=R(1.8,2.6);
+      addSign(b,f,R(8,Math.min(b.h-4,46)),w,h,pick(NEON));
+    }
+    if(rng()<.6){
+      const w=Math.min(R(6,12),b.w*.9);
+      addSign(b,f,R(8,Math.min(b.h-3,28)),w,R(2,3.2),pick(NEON));
+    }
+  }else if(dd<170 && rng()<.18 && b.h>20){
+    const f=pick([{nx:1,nz:0},{nx:-1,nz:0},{nx:0,nz:1},{nx:0,nz:-1}]);
+    addSign(b,f,R(6,Math.min(b.h-4,40)),R(1.8,2.6),R(7,14),pick(NEON));
+  }
+}
+const sGeo=new THREE.PlaneGeometry(1,1);
+const sCount=signs.length;
+const sSeed=new Float32Array(sCount), sCol=new Float32Array(sCount*3);
+const signMat=new THREE.ShaderMaterial({
+  side:THREE.DoubleSide,
+  uniforms:{uTime:U.uTime,uFogColor:U.uFogColor,uFogDensity:U.uFogDensity},
+  vertexShader:VS_FLAT,
+  fragmentShader:`
+  uniform float uTime,uFogDensity;uniform vec3 uFogColor;
+  varying vec2 vUv;varying vec3 vScale,vColor;varying float vSeed,vFog;
+  ${COMMON}${GLYPH}
+  void main(){
+    vec2 sc=vScale.xy;
+    bool vert=sc.y>sc.x;
+    vec2 grid=vert?vec2(1.,max(1.,floor(sc.y/1.5))):vec2(max(1.,floor(sc.x/1.6)),1.);
+    vec2 guv=vUv*grid;vec2 id=floor(guv),p=fract(guv);
+    float scroll=(!vert&&hash11(vSeed*3.3)>.6)?floor(uTime*1.2):0.;
+    float gs=vSeed*31.7+id.x*7.3+id.y*13.1+scroll*3.7;
+    float b=min(min(vUv.x,1.-vUv.x)*sc.x,min(vUv.y,1.-vUv.y)*sc.y);
+    float ink=glyph(p,gs)*ss(.20,.30,b);
+    float tube=fs(.10,.16,b)*ss(.02,.06,b);
+    float fl=.82+.18*sin(uTime*(2.+6.*hash11(vSeed))+vSeed*40.);
+    float drop=step(.985,hash12(vec2(floor(uTime*3.),vSeed)));
+    fl*=1.-.85*drop*step(.5,hash11(vSeed*9.));                 /* срывы неона */
+    if(hash11(vSeed*5.)>.9) fl*=.6+.4*step(.4,fract(uTime*24.)); /* гудящая вывеска */
+    vec3 col=vec3(.012,.014,.02)+vColor*.02;
+    col+=vColor*(ink*3.6+tube*1.1)*fl;
+    col=applyFog(col,vFog,uFogColor,uFogDensity);
+    gl_FragColor=vec4(col,1.);
+  }`
+});
+const signMesh=new THREE.InstancedMesh(sGeo,signMat,sCount);
+{
+  const m=new THREE.Matrix4(),p=new THREE.Vector3(),q=new THREE.Quaternion(),s=new THREE.Vector3(),Y=new THREE.Vector3(0,1,0);
+  signs.forEach((sg,i)=>{
+    q.setFromAxisAngle(Y,sg.ry);p.set(sg.x,sg.y,sg.z);s.set(sg.w,sg.h,1);
+    m.compose(p,q,s);signMesh.setMatrixAt(i,m);
+    sSeed[i]=sg.seed;sCol[i*3]=sg.color.r;sCol[i*3+1]=sg.color.g;sCol[i*3+2]=sg.color.b;
+  });
+}
+sGeo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(sSeed,1));
+sGeo.setAttribute('aColor',new THREE.InstancedBufferAttribute(sCol,3));
+signMesh.frustumCulled=false; scene.add(signMesh);
+
+/* ============================================================
+   БОЛЬШИЕ ЭКРАНЫ-БИЛЛБОРДЫ (4 процедурные «программы»)
+============================================================ */
+const screens=[];
+function addScreen(b,f,y,w){
+  const h=w*9/16;
+  const x=b.x+f.nx*(b.w/2+.45), z=b.z+f.nz*(b.d/2+.45);
+  const ry=f.nx!==0?(f.nx>0?Math.PI/2:-Math.PI/2):(f.nz>0?0:Math.PI);
+  screens.push({x,y,z,ry,w,h,seed:rng()*100,color:pick(NEON)});
+}
+for(const b of megas){
+  const dd=Math.max(b.dist,.001);
+  addScreen(b,faceToward(b,{x:b.x/dd,z:b.z/dd}),R(55,95),b.w*.85);
+}
+{
+  const outer=buildings.filter(b=>b.dist>RING+12&&b.dist<RING+50&&b.h>70).slice(0,3);
+  for(const b of outer) addScreen(b,faceToward(b,{x:-b.x/b.dist,z:-b.z/b.dist}),R(38,58),Math.min(b.w*.8,14));
+}
+const scrGeo=new THREE.PlaneGeometry(1,1);
+const scrCount=screens.length;
+const scrSeed=new Float32Array(scrCount),scrCol=new Float32Array(scrCount*3);
+const screenMat=new THREE.ShaderMaterial({
+  side:THREE.DoubleSide,
+  uniforms:{uTime:U.uTime,uFogColor:U.uFogColor,uFogDensity:U.uFogDensity},
+  vertexShader:VS_FLAT,
+  fragmentShader:`
+  uniform float uTime,uFogDensity;uniform vec3 uFogColor;
+  varying vec2 vUv;varying vec3 vScale,vColor;varying float vSeed,vFog;
+  ${COMMON}${GLYPH}
+  void main(){
+    float mode=floor(hash11(vSeed)*3.999);
+    vec2 uv=vUv;vec3 c=vec3(0.);float t=uTime;
+    if(mode<.5){                                       /* эквалайзер */
+      float cols=22.;float cx=floor(uv.x*cols),fx=fract(uv.x*cols);
+      float hgt=.15+.75*(.5+.5*sin(t*(1.5+hash11(cx)*2.)+cx*.8))*(.6+.4*vnoise(vec2(cx*.3,t*.7)));
+      float on=step(uv.y,hgt)*ss(.1,.14,fx)*fs(.86,.9,fx);
+      vec3 gc=mix(vec3(0.,.9,1.),vec3(1.,.15,.6),uv.y);
+      c=gc*on*2.6+vec3(1.)*fs(.0,.02,abs(uv.y-hgt))*ss(.1,.14,fx)*fs(.86,.9,fx)*3.;
+    }else if(mode<1.5){                                /* плазма + кольцо */
+      float v=sin(uv.x*6.+t*.7)+sin(uv.y*8.-t*.9)+sin((uv.x+uv.y)*5.+t*.5)+sin(length(uv-.5)*12.-t*1.2);
+      v=v*.25+.5;
+      c=mix(vec3(.05,.1,.5),mix(vec3(1.,.1,.55),vec3(1.,.6,.1),ss(.6,.9,v)),ss(.2,.8,v))*2.2;
+      float ring=fs(.01,.03,abs(length(uv-vec2(.5,.55))-.28-.03*sin(t*2.)));
+      c+=vec3(.9,.95,1.)*ring*2.5;
+    }else if(mode<2.5){                                /* глиф-дождь */
+      float cols=16.;float cx=floor(uv.x*cols);
+      float sp=.5+hash11(cx)*1.5;float yy=uv.y+t*sp*.25;
+      vec2 gid=vec2(cx,floor(yy*10.)),gp=vec2(fract(uv.x*cols),fract(yy*10.));
+      float g=glyph(gp,hash12(gid)*97.);
+      float fade=pow(fract(yy+hash11(cx)*7.),3.);
+      c=mix(vec3(.1,1.,.65),vec3(1.,.2,.7),step(.7,hash11(cx*3.1)))*g*fade*3.;
+    }else{                                             /* мега-глиф + тикер */
+      float s=floor(t*.7);
+      vec2 p=(uv-vec2(.5,.58))*vec2(vScale.x/vScale.y,1.)*1.15+.5;
+      float g=(p.x>0.&&p.x<1.&&p.y>0.&&p.y<1.)?glyph(p,s*7.3+vSeed):0.;
+      vec3 tc=mix(vec3(1.,.2,.5),vec3(.2,.9,1.),.5+.5*sin(t*.5+vSeed));
+      c=tc*g*3.2;
+      if(uv.y<.18){vec2 q=vec2(uv.x*8.-t*.6,uv.y*8.);c+=tc*glyph(fract(q),hash12(floor(q))*53.)*2.2;}
+    }
+    c*=.82+.18*sin(uv.y*220.+t*8.);                    /* скан-линии */
+    float bd=min(min(uv.x,1.-uv.x)*vScale.x,min(uv.y,1.-uv.y)*vScale.y);
+    c*=ss(.1,.35,bd);
+    c+=vec3(.01,.012,.02);
+    c*=.92+.08*hash11(floor(t*30.));
+    c=applyFog(c,vFog,uFogColor,uFogDensity);
+    gl_FragColor=vec4(c,1.);
+  }`
+});
+const scrMesh=new THREE.InstancedMesh(scrGeo,screenMat,scrCount);
+{
+  const m=new THREE.Matrix4(),p=new THREE.Vector3(),q=new THREE.Quaternion(),s=new THREE.Vector3(),Y=new THREE.Vector3(0,1,0);
+  screens.forEach((sc,i)=>{
+    q.setFromAxisAngle(Y,sc.ry);p.set(sc.x,sc.y,sc.z);s.set(sc.w,sc.h,1);
+    m.compose(p,q,s);scrMesh.setMatrixAt(i,m);
+    scrSeed[i]=sc.seed;scrCol[i*3]=sc.color.r;scrCol[i*3+1]=sc.color.g;scrCol[i*3+2]=sc.color.b;
+  });
+}
+scrGeo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(scrSeed,1));
+scrGeo.setAttribute('aColor',new THREE.InstancedBufferAttribute(scrCol,3));
+scrMesh.frustumCulled=false; scene.add(scrMesh);
+
+/* ============================================================
+   КРЫШИ: антенны + мигающие маяки, фонари, световые лужи
+============================================================ */
+function solidMat(hex,emiss){
+  return new THREE.ShaderMaterial({
+    uniforms:{uColor:{value:new THREE.Color(hex)},uE:{value:emiss},uFogColor:U.uFogColor,uFogDensity:U.uFogDensity},
+    vertexShader:`varying float vFog;varying vec3 vN;
+    void main(){vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.);
+    vN=normalize(mat3(instanceMatrix)*normal);vec4 mv=viewMatrix*wp;vFog=-mv.z;
+    gl_Position=projectionMatrix*mv;}`,
+    fragmentShader:`uniform vec3 uColor,uFogColor;uniform float uE,uFogDensity;varying float vFog;varying vec3 vN;
+    ${COMMON}
+    void main(){vec3 c=uColor*(.3+.7*max(dot(vN,normalize(vec3(-.4,.8,-.3))),0.))+uColor*uE;
+    c=applyFog(c,vFog,uFogColor,uFogDensity);gl_FragColor=vec4(c,1.);}`
+  });
+}
+const antennas=[],beacons=[];
+for(const b of buildings){
+  if(b.h>85){
+    if(b.h>110){
+      const ah=R(7,14);
+      antennas.push({x:b.x+b.w/4,z:b.z+b.d/4,y:b.h+ah/2,h:ah});
+      beacons.push({x:b.x+b.w/4,z:b.z+b.d/4,y:b.h+ah+.4,ph:R(0,6.28)});
+    }else beacons.push({x:b.x,z:b.z,y:b.h+.5,ph:R(0,6.28)});
+  }
+}
+const antMesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),solidMat(0x101318,0),antennas.length);
+{
+  const m=new THREE.Matrix4();
+  antennas.forEach((a,i)=>{m.makeScale(.22,a.h,.22);m.setPosition(a.x,a.y,a.z);antMesh.setMatrixAt(i,m);});
+}
+antMesh.frustumCulled=false;scene.add(antMesh);
+
+const beaGeo=new THREE.SphereGeometry(.5,8,6);
+const beaPh=new Float32Array(beacons.length);
+const beaMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:U.uTime,uFogColor:U.uFogColor,uFogDensity:U.uFogDensity},
+  vertexShader:`attribute float aPhase;varying float vPh,vFog;
+  void main(){vPh=aPhase;vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.);
+  vec4 mv=viewMatrix*wp;vFog=-mv.z;gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`uniform float uTime,uFogDensity;uniform vec3 uFogColor;varying float vPh,vFog;
+  ${COMMON}
+  void main(){float p=pow(.5+.5*sin(uTime*2.2+vPh),8.);
+  vec3 c=vec3(1.,.08,.1)*(.15+5.5*p);
+  c=applyFog(c,vFog,uFogColor,uFogDensity);gl_FragColor=vec4(c,1.);}`
+});
+const beaMesh=new THREE.InstancedMesh(beaGeo,beaMat,beacons.length);
+{
+  const m=new THREE.Matrix4();
+  beacons.forEach((b,i)=>{m.identity();m.setPosition(b.x,b.y,b.z);beaMesh.setMatrixAt(i,m);beaPh[i]=b.ph;});
+}
+beaGeo.setAttribute('aPhase',new THREE.InstancedBufferAttribute(beaPh,1));
+beaMesh.frustumCulled=false;scene.add(beaMesh);
+
+/* фонари вдоль кольцевого проспекта */
+const lamps=[];
+for(let side=-1;side<=1;side+=2)for(let i=0;i<26;i++){
+  const a=i/26*Math.PI*2+(side>0?.06:0), r=RING+side*9.6;
+  const x=Math.cos(a)*r,z=Math.sin(a)*r;
+  lamps.push({x,z,hx:x-Math.cos(a)*side*.8,hz:z-Math.sin(a)*side*.8});
+}
+const poleMesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),solidMat(0x151820,0),lamps.length);
+const headMesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),solidMat(0xffb46b,3.2),lamps.length);
+{
+  const m=new THREE.Matrix4();
+  lamps.forEach((l,i)=>{
+    m.makeScale(.14,8.6,.14);m.setPosition(l.x,4.3,l.z);poleMesh.setMatrixAt(i,m);
+    m.makeScale(.6,.16,.34);m.setPosition(l.hx,8.5,l.hz);headMesh.setMatrixAt(i,m);
+  });
+}
+poleMesh.frustumCulled=headMesh.frustumCulled=false;
+scene.add(poleMesh,headMesh);
+
+/* мягкие цветные «лужи света» на асфальте (аддитивные декали) */
+const decals=[];
+const AMBER=new THREE.Color(0xffb46b);
+for(const l of lamps) decals.push({x:l.hx,z:l.hz,s:10,c:AMBER,a:.10});
+for(const sg of signs){
+  const nx=Math.sin(sg.ry),nz=Math.cos(sg.ry);
+  decals.push({x:sg.x+nx*2.5,z:sg.z+nz*2.5,s:Math.min(Math.max(sg.h*.9,6),15),c:sg.color,a:.10});
+}
+for(const sc of screens){
+  const nx=Math.sin(sc.ry),nz=Math.cos(sc.ry);
+  decals.push({x:sc.x+nx*5,z:sc.z+nz*5,s:22,c:sc.color,a:.12});
+}
+const decGeo=new THREE.PlaneGeometry(1,1);
+const decCol=new Float32Array(decals.length*4);
+const decMat=new THREE.ShaderMaterial({
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  uniforms:{uFogDensity:U.uFogDensity},
+  vertexShader:`attribute vec4 aCol;varying vec2 vUv;varying vec4 vCol;varying float vFog;
+  void main(){vUv=uv;vCol=aCol;vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.);
+  vec4 mv=viewMatrix*wp;vFog=-mv.z;gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`uniform float uFogDensity;varying vec2 vUv;varying vec4 vCol;varying float vFog;
+  ${COMMON}
+  void main(){float d=length(vUv-.5)*2.;float a=pow(max(1.-d,0.),2.2)*vCol.a;
+  vec3 c=vCol.rgb*a*fogKeep(vFog,uFogDensity);gl_FragColor=vec4(c,1.);}`
+});
+const decMesh=new THREE.InstancedMesh(decGeo,decMat,decals.length);
+{
+  const m=new THREE.Matrix4(),p=new THREE.Vector3(),q=new THREE.Quaternion(),s=new THREE.Vector3();
+  q.setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2);
+  decals.forEach((d,i)=>{
+    p.set(d.x,.06,d.z);s.set(d.s,d.s,1);m.compose(p,q,s);decMesh.setMatrixAt(i,m);
+    decCol[i*4]=d.c.r;decCol[i*4+1]=d.c.g;decCol[i*4+2]=d.c.b;decCol[i*4+3]=d.a;
+  });
+}
+decGeo.setAttribute('aCol',new THREE.InstancedBufferAttribute(decCol,4));
+decMesh.frustumCulled=false;decMesh.renderOrder=1;scene.add(decMesh);
+
+/* ============================================================
+   МОКРЫЙ АСФАЛЬТ: планарное отражение + лужи + рябь + разметка
+============================================================ */
+const groundMat=new THREE.ShaderMaterial({
+  uniforms:{
+    uRefl:{value:rtRefl.texture},uReflMat:{value:new THREE.Matrix4()},
+    uReflTexel:{value:new THREE.Vector2()},uTime:U.uTime,uCamPos:U.uCamPos,
+    uFogColor:U.uFogColor,uFogDensity:U.uFogDensity
+  },
+  vertexShader:`
+  uniform mat4 uReflMat;varying vec3 vWorld;varying vec4 vReflUv;varying float vFog;
+  void main(){vec4 wp=modelMatrix*vec4(position,1.);vWorld=wp.xyz;vReflUv=uReflMat*wp;
+  vec4 mv=viewMatrix*wp;vFog=-mv.z;gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`
+  uniform sampler2D uRefl;uniform vec2 uReflTexel;uniform float uTime,uFogDensity;
+  uniform vec3 uCamPos,uFogColor;
+  varying vec3 vWorld;varying vec4 vReflUv;varying float vFog;
+  ${COMMON}
+  void main(){
+    vec2 w=vWorld.xz;float r=length(w);
+    vec2 g=abs(fract(w/30.+.5)-.5)*30.;
+    float road=max(fs(4.6,5.2,g.x),fs(4.6,5.2,g.y));
+    road=max(road,fs(8.8,9.4,abs(r-62.)));
+    float sidewalk=1.-road;
+    /* разметка */
+    vec3 mark=vec3(0.);
+    float lx=fs(.10,.15,g.x)*step(fract(w.y/7.),.55)*step(5.5,g.y);
+    float lz=fs(.10,.15,g.y)*step(fract(w.x/7.),.55)*step(5.5,g.x);
+    mark+=vec3(1.,.5,.12)*(lx+lz)*.5;
+    mark+=vec3(.1,.8,1.)*.45*fs(.15,.5,abs(abs(r-62.)-8.6));
+    mark+=vec3(1.,.5,.12)*.5*fs(.1,.3,abs(r-62.))*step(fract(atan(w.y,w.x)*62./7.),.55);
+    float cw=ss(4.6,4.8,g.x)*fs(7.0,7.2,g.x)*fs(4.0,4.2,g.y)*step(fract(w.y/1.4),.6);
+    cw+=ss(4.6,4.8,g.y)*fs(7.0,7.2,g.y)*fs(4.0,4.2,g.x)*step(fract(w.x/1.4),.6);
+    mark+=vec3(.8,.85,.9)*cw*.18;
+    /* асфальт */
+    float grain=vnoise(w*3.)*.5+vnoise(w*13.)*.5;
+    vec3 base=mix(vec3(.012,.014,.019),vec3(.022,.024,.03),grain);
+    base*=mix(1.,1.5,sidewalk);
+    float tile=fs(.02,.06,min(fract(w.x/2.5),fract(w.y/2.5)))*sidewalk;
+    base*=1.-.35*tile;
+    float pud=ss(.48,.72,fbm(w*.05)+.2*fbm(w*.33)-.1);
+    base*=1.-pud*.55;
+    /* отражение с рябью */
+    vec2 ruv=vReflUv.xy/vReflUv.w;
+    vec2 rip=vec2(fbm(w*1.3+uTime*.35),fbm(w*1.3+7.7-uTime*.3))-.5;
+    rip+=.12*vec2(sin(w.x*3.1+uTime*2.1),sin(w.y*3.7-uTime*1.8));
+    float rdist=length(vWorld-uCamPos);
+    ruv+=rip*(.012+.03*pud)*clamp(30./(10.+rdist),.15,1.);
+    ruv=clamp(ruv,.001,.999);
+    vec2 bl=uReflTexel*(1.5+3.5*(1.-pud));
+    vec3 refl=(texture2D(uRefl,ruv).rgb
+      +texture2D(uRefl,ruv+vec2(bl.x,0.)).rgb+texture2D(uRefl,ruv-vec2(bl.x,0.)).rgb
+      +texture2D(uRefl,ruv+vec2(0.,bl.y)).rgb+texture2D(uRefl,ruv-vec2(0.,bl.y)).rgb)*.2;
+    vec3 V=normalize(uCamPos-vWorld);
+    float F=.18+.82*pow(1.-max(V.y,0.),3.);
+    float rs=mix(.06,.95,pud)*F+road*.05*F;
+    vec3 col=base+mark+refl*rs*vec3(.9,.95,1.05);
+    col=applyFog(col,vFog,uFogColor,uFogDensity);
+    gl_FragColor=vec4(col,1.);
+  }`
+});
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(1400,1400),groundMat);
+ground.rotation.x=-Math.PI/2;scene.add(ground);
+
+/* ============================================================
+   ЛЕТАЮЩИЕ МАШИНЫ + СВЕТОВЫЕ СЛЕДЫ
+============================================================ */
+const LANES=[
+  {r:60, h:38,n:7, sp:.22, dir: 1,col:0xff4455},
+  {r:66, h:43,n:7, sp:.20, dir:-1,col:0x9fe8ff},
+  {r:38, h:52,n:9, sp:.12, dir: 1,col:0xff5533},
+  {r:88, h:60,n:10,sp:.10, dir:-1,col:0x9fe8ff},
+  {r:112,h:76,n:10,sp:.085,dir: 1,col:0xff4455},
+  {r:140,h:95,n:12,sp:.07, dir:-1,col:0xbfe9ff},
+  {r:170,h:115,n:12,sp:.055,dir:1,col:0xff6644}
+];
+const cars=[];
+for(const ln of LANES)for(let i=0;i<ln.n;i++){
+  cars.push({ln,ph:i/ln.n*Math.PI*2+R(-.2,.2),rj:R(-2.5,2.5),hj:R(-2,2),bob:R(0,6.28),
+    len:R(2.4,3.2),wid:R(1.0,1.3),col:new THREE.Color(ln.col)});
+}
+const carGeo=new THREE.BoxGeometry(1,1,1);
+const carCol=new Float32Array(cars.length*3);
+const carMat=new THREE.ShaderMaterial({
+  uniforms:{uFogColor:U.uFogColor,uFogDensity:U.uFogDensity},
+  vertexShader:`attribute vec3 aCol;varying vec3 vN,vLocal,vCol;varying float vFog;
+  void main(){vec3 sc=vec3(length(instanceMatrix[0].xyz),length(instanceMatrix[1].xyz),length(instanceMatrix[2].xyz));
+  vLocal=position*sc;vN=normal;vCol=aCol;
+  vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.);
+  vec4 mv=viewMatrix*wp;vFog=-mv.z;gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`uniform vec3 uFogColor;uniform float uFogDensity;
+  varying vec3 vN,vLocal,vCol;varying float vFog;
+  ${COMMON}
+  void main(){
+    vec3 col=vec3(.008,.01,.014);
+    if(vN.x>.5) col=vec3(.7,.9,1.)*5.;                       /* фары */
+    else if(vN.x<-.5) col=vec3(1.,.12,.08)*4.;               /* хвостовые */
+    else if(abs(vN.y)>.5){col+=vec3(.02,.03,.05);if(vN.y>.5)col+=vCol*.15;}
+    else{float strip=step(abs(vLocal.y),.08)*step(abs(vLocal.x),.9);col+=vCol*strip*1.2;}
+    col=applyFog(col,vFog,uFogColor,uFogDensity);
+    gl_FragColor=vec4(col,1.);
+  }`
+});
+const carMesh=new THREE.InstancedMesh(carGeo,carMat,cars.length);
+carMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+cars.forEach((c,i)=>{carCol[i*3]=c.col.r;carCol[i*3+1]=c.col.g;carCol[i*3+2]=c.col.b;});
+carGeo.setAttribute('aCol',new THREE.InstancedBufferAttribute(carCol,3));
+carMesh.frustumCulled=false;scene.add(carMesh);
+
+/* след = два перекрещенных градиентных квада (видно с любого ракурса) */
+const trGeo=new THREE.BufferGeometry();
+trGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array([
+  -1,0,-.5,  0,0,-.5,  0,0,.5,  -1,0,.5,
+  -1,-.5,0,  0,-.5,0,  0,.5,0,  -1,.5,0]),3));
+trGeo.setAttribute('uv',new THREE.BufferAttribute(new Float32Array([
+  0,0, 1,0, 1,1, 0,1,  0,0, 1,0, 1,1, 0,1]),2));
+trGeo.setIndex([0,1,2,0,2,3, 4,5,6,4,6,7]);
+const trCol=new Float32Array(cars.length*3),trSeed=new Float32Array(cars.length);
+const trMat=new THREE.ShaderMaterial({
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
+  uniforms:{uTime:U.uTime,uFogDensity:U.uFogDensity},
+  vertexShader:`attribute vec3 aCol;attribute float aSeed;
+  varying vec2 vUv;varying vec3 vCol;varying float vSeed,vFog;
+  void main(){vUv=uv;vCol=aCol;vSeed=aSeed;
+  vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.);
+  vec4 mv=viewMatrix*wp;vFog=-mv.z;gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`uniform float uTime,uFogDensity;varying vec2 vUv;varying vec3 vCol;varying float vSeed,vFog;
+  ${COMMON}
+  void main(){
+    float a=pow(vUv.x,1.7);
+    float e=1.-abs(vUv.y*2.-1.);a*=e*e;
+    a*=.85+.15*sin(vUv.x*30.-uTime*18.+vSeed);
+    vec3 c=vCol*a*2.6*fogKeep(vFog,uFogDensity);
+    gl_FragColor=vec4(c,1.);
+  }`
+});
+const trMesh=new THREE.InstancedMesh(trGeo,trMat,cars.length);
+trMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+cars.forEach((c,i)=>{trCol[i*3]=c.col.r;trCol[i*3+1]=c.col.g;trCol[i*3+2]=c.col.b;trSeed[i]=R(0,40);});
+trGeo.setAttribute('aCol', new THREE.InstancedBufferAttribute(trCol,3));
+trGeo.setAttribute('aSeed',new THREE.InstancedBufferAttribute(trSeed,1));
+trMesh.frustumCulled=false;trMesh.renderOrder=2;scene.add(trMesh);
+
+/* ============================================================
+   ПРОЖЕКТОРЫ на крышах (объёмные лучи)
+============================================================ */
+let beamBases=buildings.filter(b=>b.dist>RING+12&&b.h>90);
+if(beamBases.length<2) beamBases=[...buildings].sort((a,b)=>b.h-a.h).slice(0,2);
+beamBases=[beamBases[0],beamBases[Math.floor(beamBases.length/2)]];
+const beamGeo=new THREE.ConeGeometry(7,130,24,1,true);
+beamGeo.rotateX(Math.PI);beamGeo.translate(0,65,0);
+const beamMat=new THREE.ShaderMaterial({
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
+  uniforms:{uCamPos:U.uCamPos,uFogDensity:U.uFogDensity},
+  vertexShader:`varying vec2 vUv;varying vec3 vN,vWorld;varying float vFog;
+  void main(){vUv=uv;vN=normalize(mat3(instanceMatrix)*normal);
+  vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.);vWorld=wp.xyz;
+  vec4 mv=viewMatrix*wp;vFog=-mv.z;gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`uniform vec3 uCamPos;uniform float uFogDensity;
+  varying vec2 vUv;varying vec3 vN,vWorld;varying float vFog;
+  ${COMMON}
+  void main(){
+    vec3 V=normalize(uCamPos-vWorld);
+    float edge=pow(abs(dot(normalize(vN),V)),1.4);
+    float a=pow(vUv.y,2.2)*.06*edge;
+    vec3 c=vec3(.4,.7,1.)*a*fogKeep(vFog,uFogDensity);
+    gl_FragColor=vec4(c,1.);
+  }`
+});
+const beamMesh=new THREE.InstancedMesh(beamGeo,beamMat,2);
+beamMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+beamMesh.frustumCulled=false;beamMesh.renderOrder=2;scene.add(beamMesh);
+
+/* ============================================================
+   ЛЁГКИЙ ДОЖДЬ (полностью в вершинном шейдере, без нагрузки на CPU)
+============================================================ */
+const RAIN_N=450;
+const rainGeo=new THREE.PlaneGeometry(1,1);
+const rainSeed=new Float32Array(RAIN_N);
+for(let i=0;i<RAIN_N;i++)rainSeed[i]=R(0,1000);
+rainGeo.setAttribute('aSeed',new THREE.InstancedBufferAttribute(rainSeed,1));
+const rainMat=new THREE.ShaderMaterial({
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+  uniforms:{uTime:U.uTime,uCamPos:U.uCamPos,uFogDensity:U.uFogDensity},
+  vertexShader:`
+  attribute float aSeed;uniform float uTime;uniform vec3 uCamPos;
+  varying float vA;varying vec2 vUv;varying float vFog;
+  ${COMMON}
+  void main(){
+    vUv=uv;float s=aSeed;
+    float wx=mod(hash11(s*1.1)*110.-uCamPos.x,110.)-55.+uCamPos.x;
+    float wz=mod(hash11(s*2.3)*110.-uCamPos.z,110.)-55.+uCamPos.z;
+    float fall=mod(hash11(s*3.7)*80.-uTime*(20.+8.*hash11(s*4.1)),70.);
+    vec3 center=vec3(wx+(70.-fall)*.06,fall-22.,wz);
+    vec4 mv=viewMatrix*vec4(center,1.);
+    mv.xy+=position.xy*vec2(.05,1.4);
+    vFog=-mv.z;
+    vA=.09*ss(0.,8.,fall)*fs(55.,70.,fall);
+    vA*=fs(30.,110.,length(mv.xyz));
+    vA*=fs(40.,55.,abs(wx-uCamPos.x))*fs(40.,55.,abs(wz-uCamPos.z));
+    gl_Position=projectionMatrix*mv;
+  }`,
+  fragmentShader:`uniform float uFogDensity;varying float vA;varying vec2 vUv;varying float vFog;
+  ${COMMON}
+  void main(){
+    float a=vA*(1.-abs(vUv.x*2.-1.))*ss(0.,.3,vUv.y)*fs(.7,1.,vUv.y);
+    vec3 c=vec3(.5,.65,.9)*a*fogKeep(vFog,uFogDensity);
+    gl_FragColor=vec4(c,1.);
+  }`
+});
+const rain=new THREE.InstancedMesh(rainGeo,rainMat,RAIN_N);
+{const m=new THREE.Matrix4();for(let i=0;i<RAIN_N;i++)rain.setMatrixAt(i,m);}
+rain.frustumCulled=false;rain.renderOrder=3;scene.add(rain);
+
+/* ============================================================
+   КАМЕРА: медленный плавный облёт по кольцевому проспекту
+============================================================ */
+const mirrorCam=new THREE.PerspectiveCamera();
+const lookTarget=new THREE.Vector3();
+let mx=0,my=0,tmx=0,tmy=0;
+addEventListener('pointermove',e=>{
+  tmx=(e.clientX/innerWidth)*2-1; tmy=(e.clientY/innerHeight)*2-1;
+});
+function updateCamera(t){
+  mx+=(tmx-mx)*.04; my+=(tmy-my)*.04;
+  const th=t*(Math.PI*2/95);                        // полный круг ~95 секунд
+  const rad=RING+Math.sin(t*.05)*3;
+  const py=26+Math.sin(t*.11)*5+Math.sin(t*.043+2)*2.5;
+  camera.position.set(
+    Math.cos(th)*rad+Math.sin(t*.9)*.12+Math.sin(t*1.7+1)*.06,
+    py+Math.sin(t*1.3)*.08,
+    Math.sin(th)*rad+Math.cos(t*.8)*.12);
+  const ta=th+.34,tr=RING*.42;
+  lookTarget.set(Math.cos(ta)*tr+mx*8, 30+Math.sin(t*.07+1)*9-my*6, Math.sin(ta)*tr);
+  camera.lookAt(lookTarget);
+  camera.rotateZ(Math.sin(t*.09)*.035+.02);         // лёгкий кинематографический крен
+}
+
+/* машины и лучи */
+const _m=new THREE.Matrix4(),_p=new THREE.Vector3(),_q=new THREE.Quaternion(),_q2=new THREE.Quaternion(),
+      _s=new THREE.Vector3(),_Y=new THREE.Vector3(0,1,0),_Z=new THREE.Vector3(0,0,1),
+      _dir=new THREE.Vector3(),_up=new THREE.Vector3(),_v=new THREE.Vector3(),_tm=new THREE.Matrix4();
+function updateCars(t){
+  for(let i=0;i<cars.length;i++){
+    const c=cars[i],ln=c.ln;
+    const th=c.ph+t*ln.sp*ln.dir, r=ln.r+c.rj;
+    const y=ln.h+c.hj+Math.sin(t*.7+c.bob)*1.2;
+    const vx=-Math.sin(th)*ln.dir, vz=Math.cos(th)*ln.dir;
+    const yaw=Math.atan2(-vz,vx);
+    _p.set(Math.cos(th)*r,y,Math.sin(th)*r);
+    _q.setFromAxisAngle(_Y,yaw);
+    _q2.setFromAxisAngle(_Z,ln.dir*.12);_q.multiply(_q2);
+    _s.set(c.len,.5,c.wid);
+    _m.compose(_p,_q,_s);carMesh.setMatrixAt(i,_m);
+    const L=Math.min(6+(ln.sp*r)*1.1,18);
+    _p.x-=vx*(c.len*.5+.1);_p.z-=vz*(c.len*.5+.1);
+    _s.set(L,.55,.55);
+    _m.compose(_p,_q,_s);trMesh.setMatrixAt(i,_m);
+  }
+  carMesh.instanceMatrix.needsUpdate=true;
+  trMesh.instanceMatrix.needsUpdate=true;
+}
+function updateBeams(t){
+  for(let i=0;i<2;i++){
+    const b=beamBases[i];
+    _p.set(b.x,b.h+1,b.z);
+    _q.setFromAxisAngle(_Y,t*.12+i*Math.PI);
+    _q2.setFromAxisAngle(_Z,.3);_q.multiply(_q2);
+    _s.set(1,1,1);_m.compose(_p,_q,_s);beamMesh.setMatrixAt(i,_m);
+  }
+  beamMesh.instanceMatrix.needsUpdate=true;
+}
+
+/* ============================================================
+   РАЗМЕРЫ + АДАПТИВНОЕ РАЗРЕШЕНИЕ (держим 60 к/с)
+============================================================ */
+let DPR=Math.min(devicePixelRatio||1,1.5),scale=1,W=2,H=2;
+function resize(){
+  renderer.setPixelRatio(DPR*scale);
+  renderer.setSize(innerWidth,innerHeight);
+  const s=renderer.getDrawingBufferSize(new THREE.Vector2());
+  W=Math.max(2,s.x);H=Math.max(2,s.y);
+  rtScene.setSize(W,H);
+  rtRefl.setSize(Math.max(2,W>>1),Math.max(2,H>>1));
+  rtAccum.setSize(Math.max(2,W>>1),Math.max(2,H>>1));
+  for(let i=0;i<4;i++){
+    const w=Math.max(2,W>>(i+1)),h=Math.max(2,H>>(i+1));
+    levels[i].a.setSize(w,h);levels[i].b.setSize(w,h);
+    levels[i].tex.set(1/w,1/h);
+  }
+  groundMat.uniforms.uReflTexel.value.set(1/rtRefl.width,1/rtRefl.height);
+  finalMat.uniforms.uRes.value.set(W,H);
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize',resize);
+resize();
+
+/* ============================================================
+   ГЛАВНЫЙ ЦИКЛ
+============================================================ */
+const clock=new THREE.Clock();
+let t=0,acc=0,frames=0,cool=0,booted=false;
+
+function frame(){
+  requestAnimationFrame(frame);
+  const dt=Math.min(clock.getDelta(),.05);
+  t+=dt;
+  U.uTime.value=t;
+  updateCamera(t);
+  updateCars(t);
+  updateBeams(t);
+  U.uCamPos.value.copy(camera.position);
+
+  /* --- 1. планарное отражение (сцена вниз головой, половина разрешения) --- */
+  camera.getWorldDirection(_dir);
+  mirrorCam.position.copy(camera.position);mirrorCam.position.y*=-1;
+  _dir.y*=-1;
+  _up.set(0,1,0).applyQuaternion(camera.quaternion);_up.y*=-1;
+  mirrorCam.up.copy(_up);
+  mirrorCam.lookAt(_v.copy(mirrorCam.position).add(_dir));
+  mirrorCam.projectionMatrix.copy(camera.projectionMatrix);
+  mirrorCam.updateMatrixWorld();
+  _tm.set(.5,0,0,.5, 0,.5,0,.5, 0,0,.5,.5, 0,0,0,1);
+  _tm.multiply(mirrorCam.projectionMatrix).multiply(mirrorCam.matrixWorldInverse);
+  groundMat.uniforms.uReflMat.value.copy(_tm);
+  ground.visible=false;rain.visible=false;decMesh.visible=false;
+  renderer.setRenderTarget(rtRefl);renderer.clear();
+  renderer.render(scene,mirrorCam);
+  ground.visible=true;rain.visible=true;decMesh.visible=true;
+
+  /* --- 2. основной HDR-рендер --- */
+  renderer.setRenderTarget(rtScene);renderer.clear();
+  renderer.render(scene,camera);
+
+  /* --- 3. bloom: яркое → 4 уровня гаусса + анаморфный горизонтальный --- */
+  brightMat.uniforms.tSrc.value=rtScene.texture;
+  blit(brightMat,levels[0].a);
+  blurPair(levels[0]);
+  renderer.setRenderTarget(rtAccum);renderer.clear();
+  accum(levels[0].a,levels[0].w);
+  for(let i=1;i<4;i++){
+    copyMat.uniforms.tSrc.value=levels[i-1].a.texture;
+    blit(copyMat,levels[i].a);
+    blurPair(levels[i]);
+    accum(levels[i].a,levels[i].w);
+  }
+  blurMat.uniforms.tSrc.value=levels[0].a.texture;
+  blurMat.uniforms.uDir.value.set(levels[0].tex.x*7,0);
+  blit(blurMat,levels[0].b);
+  accum(levels[0].b,.22,[.5,.72,1]);
+
+  /* --- 4. финальный грейд на экран --- */
+  finalMat.uniforms.tScene.value=rtScene.texture;
+  finalMat.uniforms.tBloom.value=rtAccum.texture;
+  blit(finalMat,null);
+
+  if(!booted){booted=true;window.__booted=true;boot.remove();}
+
+  /* адаптивное разрешение */
+  acc+=dt;frames++;
+  if(frames>=50){
+    const avg=acc/frames;acc=0;frames=0;
+    if(cool>0)cool--;
+    else if(avg>.019&&scale>.55){scale=Math.max(.55,scale*.85);resize();cool=2;}
+    else if(avg<.0135&&scale<1){scale=Math.min(1,scale*1.12);resize();cool=2;}
+  }
+}
+frame();
+</script>
+</body>
+</html>

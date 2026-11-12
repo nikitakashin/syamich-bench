@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-10",
+  "updated": "2026-11-12",
   "reference": "anthropic/claude-opus-5.5",
   "models": [
     {
@@ -324,6 +324,79 @@
       "correct": 5,
       "last": "2026-10-24",
       "duel": null
+    },
+    {
+      "id": "qwen/qwen4-max-preview",
+      "name": "Qwen4-Max-Preview",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 8.0,
+        "заставка": 10.0,
+        "3d-сцена": 0.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 3285,
+          "tokens_out": 6016,
+          "tokens_total": 9301,
+          "cost": 0.042666,
+          "estimated": true
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1744,
+          "tokens_out": 42196,
+          "tokens_total": 43940,
+          "cost": 0.256664,
+          "estimated": true
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 2090,
+          "tokens_out": 72676,
+          "tokens_total": 74766,
+          "cost": 0.440236,
+          "estimated": true
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 1300,
+          "tokens_out": 60331,
+          "tokens_total": 61631,
+          "cost": 0.364586,
+          "estimated": true
+        }
+      },
+      "works": {
+        "заставка": {
+          "url": "works/qwen/qwen4-max-preview/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/qwen/qwen4-max-preview/city.html",
+          "note": "Qwen получил 0/10. Оригинал зависает на загрузке. После правки опечатки здания перекрывают тёмные прямоугольники.",
+          "fixed_url": "works/qwen/qwen4-max-preview/city-fixed.html"
+        },
+        "портрет": {
+          "url": "works/qwen/qwen4-max-preview/portrait.svg"
+        }
+      },
+      "quality": 7.0,
+      "efficiency": 5.594883079286733,
+      "total": 65.7846492378602,
+      "price": 1.104152,
+      "calls": 8,
+      "seconds": 2230.1,
+      "tokens_out": 181219,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-11-12",
+      "duel": null,
+      "assumed_usd_per_million": {
+        "input": 2,
+        "output": 6
+      }
     },
     {
       "id": "anthropic/claude-sonnet-5.5",

@@ -12,6 +12,7 @@ LIFE = SITE.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--bench", type=Path, default=LIFE / "youtube/Ресерч/model-duel")
 parser.add_argument("--duels", type=Path, default=LIFE / "шоу/сямыч-бенч-дуэль")
+parser.add_argument("--exclude-model", action="append", default=[], help="Оставить указанный прогон вне этой публикации")
 options = parser.parse_args()
 
 NAMES = {
@@ -19,13 +20,19 @@ NAMES = {
     "gemini-4-carbon": "Gemini 4 Carbon", "kimi-k3.1-pro": "Kimi K3.1 Pro",
     "claude-opus-5.5": "Claude Opus 5.5", "claude-sonnet-5.5": "Claude Sonnet 5.5",
     "claude-fable-5.2": "Claude Fable 5.2",
+    "qwen4-max-preview": "Qwen4-Max-Preview",
 }
 VENDORS = {"openai": ("OpenAI", "openai"), "google": ("Google", "googlegemini"),
+           "qwen": ("Alibaba", None),
            "moonshotai": ("Moonshot AI", "moonshotai"), "anthropic": ("Anthropic", "anthropic")}
 TASK_NAMES = {"пальцы": "Пальцы", "портрет": "Портрет", "заставка": "Заставка", "3d-сцена": "3D-город"}
 HTML_TASKS = {"заставка": "intro.html", "3d-сцена": "city.html"}
 # Правки только для просмотра. Хеш привязывает их к конкретному ответу модели.
 CITY_FIXES = {
+    "1ebd4c7431229faed9985ec2ece3f72a836e1f7f8edbda0a709ecfdd366b2496": (
+        "Qwen получил 0/10. Оригинал зависает на загрузке. После правки опечатки здания перекрывают тёмные прямоугольники.",
+        [(b"transparent:addive}", b"transparent:additive}")],
+    ),
     "f03e3bbc7b9813fca6b943351b068e73868cf5ddce43ae1c40071ecbbf642d70": (
         "В оригинале Kimi сцена не запускается. В копии для просмотра исправлены опечатка в числе и параметры тумана.",
         [(b"mulberry32(0xC17Y)", b"mulberry32(0xC17A)"),
@@ -71,7 +78,7 @@ def task_usage(entries):
         "tokens_out": tokens_out,
         "tokens_total": tokens_in + tokens_out if None not in (tokens_in, tokens_out) else None,
         "cost": recorded_sum(entries, "cost"),
-        "estimated": any(r.get("cost_kind") == "api_estimate" or r.get("via") in ("claude-code", "codex-cli")
+        "estimated": any(r.get("cost_kind") in ("api_estimate", "hypothetical_release_price") or r.get("via") in ("claude-code", "codex-cli")
                          for r in entries),
     }
 
@@ -102,12 +109,15 @@ def export_works(model, by_task, source_root):
         raise ValueError(f"Некорректный идентификатор модели: {model}")
     folder = Path("works") / model
     works = {}
-    for task, target in HTML_TASKS.items():
+    targets = dict(HTML_TASKS)
+    if model == "qwen/qwen4-max-preview":
+        targets["портрет"] = "portrait.svg"
+    for task, target in targets.items():
         # Терминальный бенчмарк открывает файл из последней записи задачи.
         if not by_task[task]:
             continue
         filename = by_task[task][-1]["file"]
-        if Path(filename).suffix.lower() != ".html":
+        if Path(filename).suffix.lower() != Path(target).suffix:
             continue
         source_dir = source_root / task
         source = (source_dir / filename).resolve()
@@ -169,6 +179,8 @@ def collect():
     models = []
     for row in unified:
         m = row["model"]
+        if m in options.exclude_model:
+            continue
         by_task = {t: [r for r in runs[t] if r["model"] == m] for t in core.TASKS}
         all_runs = [r for entries in by_task.values() for r in entries]
         tasks = {t: row["q"].get(t) if entries else None for t, entries in by_task.items()}
@@ -183,6 +195,8 @@ def collect():
                            tokens_out=recorded_sum(all_runs, "tokens_out"), fingers=len(by_task["пальцы"]),
                            correct=sum(bool(r.get("correct")) for r in by_task["пальцы"]),
                            last=max(r["at"] for r in all_runs)[:10], duel=originals.get(m)))
+        if all_runs[0].get("cost_kind") == "hypothetical_release_price":
+            models[-1]["assumed_usd_per_million"] = all_runs[0]["usd_per_million"]
     return sorted(models, key=lambda m: (not m["complete"], -(m["total"] or 0), m["id"]))
 
 
@@ -196,11 +210,14 @@ def render_model(model, rank):
     total = display(m["total"]) if m["complete"] else "—"
     width = (m["total"] or 0) if m["complete"] else 0
     price = "—" if m["price"] is None else "$" + display(m["price"], 2)
+    rates = m.get("assumed_usd_per_million")
+    if rates:
+        price = f'<abbr title="Расчёт по предполагаемому тарифу">≈ {price}</abbr>'
     sub = escape(vendor) if m["complete"] else f'<span class="pending">{size}/4 тестов</span>'
     tasks = "\n".join(render_task(t, score, m["task_usage"][t]) for t, score in m["tasks"].items())
     links = []
     for task, work in m["works"].items():
-        title = "Открыть заставку" if task == "заставка" else "Открыть 3D-город"
+        title = {"заставка": "Открыть заставку", "портрет": "Открыть портрет", "3d-сцена": "Открыть 3D-город"}[task]
         if "fixed_url" in work:
             title = "3D-город · оригинал с ошибкой"
         links.append((title, work["url"]))
@@ -213,6 +230,8 @@ def render_model(model, rank):
     work_notes = "".join(f'<p>{escape(work["note"])} Оценка выставлена за оригинал.</p>'
                          for work in m["works"].values() if "note" in work)
     notes = [f'Пальцы угаданы в {m["correct"]} из {m["fingers"]} ответов. Эффективность относительно Opus — {display(m["efficiency"])} из 10.']
+    if rates:
+        notes.append(f'Прогон в веб-чате. Токены и время взяты из экспорта ответов. Для цены и итогового балла принят условный тариф ${rates["input"]} за миллион входных и ${rates["output"]} за миллион выходных токенов.')
     minutes, seconds = divmod(round(m["seconds"]), 60)
     tokens = format_tokens(m["tokens_out"])
     notes.append(f'За {m["calls"]} запросов суммарно — {minutes} мин {seconds} с и {tokens} выходных токенов.')
