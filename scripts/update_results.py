@@ -23,7 +23,7 @@ NAMES = {
     "qwen4-max-preview": "Qwen4-Max-Preview",
 }
 VENDORS = {"openai": ("OpenAI", "openai"), "google": ("Google", "googlegemini"),
-           "qwen": ("Alibaba", None),
+           "qwen": ("Alibaba", "qwen"),
            "moonshotai": ("Moonshot AI", "moonshotai"), "anthropic": ("Anthropic", "anthropic")}
 TASK_NAMES = {"пальцы": "Пальцы", "портрет": "Портрет", "заставка": "Заставка", "3d-сцена": "3D-город"}
 HTML_TASKS = {"заставка": "intro.html", "3d-сцена": "city.html"}

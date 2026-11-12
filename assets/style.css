@@ -85,6 +85,7 @@ td.rank { font-size: 13px; color: #a191af; }
 .model:hover strong, .model[aria-expanded="true"] strong { color: var(--cyan); }
 .logo { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; background: #251e2e; border: 1px solid #45364f; border-radius: 5px; }
 .vendor-icon { height: 20px; width: 20px; filter: brightness(0) invert(90%); }
+.logo.qwen img { filter: none; }
 .logo.anthropic { background: #30211f; border-color: #524039; }
 .logo.anthropic img { filter: brightness(0) invert(83%) sepia(19%) saturate(710%) hue-rotate(335deg); }
 .logo.googlegemini { background: #202137; border-color: #3b3b58; }
