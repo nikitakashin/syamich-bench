@@ -17,6 +17,7 @@ options = parser.parse_args()
 
 NAMES = {
     "gpt-6-astra": "GPT-6 Astra", "gpt-6.1-terra": "GPT-6.1 Terra",
+    "gemini-4-hydrogen": "Gemini 4 Hydrogen",
     "gemini-4-carbon": "Gemini 4 Carbon", "kimi-k3.1-pro": "Kimi K3.1 Pro",
     "claude-opus-5.5": "Claude Opus 5.5", "claude-sonnet-5.5": "Claude Sonnet 5.5",
     "claude-fable-5.2": "Claude Fable 5.2",
@@ -110,7 +111,7 @@ def export_works(model, by_task, source_root):
     folder = Path("works") / model
     works = {}
     targets = dict(HTML_TASKS)
-    if model == "qwen/qwen4-max-preview":
+    if model in {"qwen/qwen4-max-preview", "google/gemini-4-hydrogen"}:
         targets["портрет"] = "portrait.svg"
     for task, target in targets.items():
         # Терминальный бенчмарк открывает файл из последней записи задачи.
@@ -230,6 +231,8 @@ def render_model(model, rank):
     work_notes = "".join(f'<p>{escape(work["note"])} Оценка выставлена за оригинал.</p>'
                          for work in m["works"].values() if "note" in work)
     notes = [f'Пальцы угаданы в {m["correct"]} из {m["fingers"]} ответов. Эффективность относительно Opus — {display(m["efficiency"])} из 10.']
+    if m["id"] == "google/gemini-4-hydrogen":
+        notes.append("Цена и время указаны по зачётным ответам. Отдельная платная попытка нарисовать портрет оборвалась и в сумму не входит.")
     if rates:
         notes.append(f'Прогон в веб-чате. Токены и время взяты из экспорта ответов. Для цены и итогового балла принят условный тариф ${rates["input"]} за миллион входных и ${rates["output"]} за миллион выходных токенов.')
     minutes, seconds = divmod(round(m["seconds"]), 60)

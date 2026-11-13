@@ -262,6 +262,73 @@
       "duel": null
     },
     {
+      "id": "google/gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 7.0,
+        "заставка": 9.0,
+        "3d-сцена": 2.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 5875,
+          "tokens_out": 1315,
+          "tokens_total": 7190,
+          "cost": 0.018675,
+          "estimated": false
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1278,
+          "tokens_out": 37498,
+          "tokens_total": 38776,
+          "cost": 0.283152,
+          "estimated": false
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 250,
+          "tokens_out": 13406,
+          "tokens_total": 13656,
+          "cost": 0.10092,
+          "estimated": false
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 252,
+          "tokens_out": 35502,
+          "tokens_total": 35754,
+          "cost": 0.266643,
+          "estimated": false
+        }
+      },
+      "works": {
+        "заставка": {
+          "url": "works/google/gemini-4-hydrogen/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/google/gemini-4-hydrogen/city.html"
+        },
+        "портрет": {
+          "url": "works/google/gemini-4-hydrogen/portrait.svg"
+        }
+      },
+      "quality": 7.0,
+      "efficiency": 8.11976410811817,
+      "total": 73.3592923243545,
+      "price": 0.66939,
+      "calls": 8,
+      "seconds": 566.1,
+      "tokens_out": 87721,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-11-12",
+      "duel": null
+    },
+    {
       "id": "anthropic/claude-opus-5.5",
       "name": "Claude Opus 5.5",
       "complete": true,

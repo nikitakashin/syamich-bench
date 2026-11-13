@@ -1,0 +1,1508 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neo-Veridia // Cyberpunk Night City</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #040712;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+
+// ---------------------------------------------------------------------------
+// 1. RENDERER, SCENES & CAPABILITIES
+// ---------------------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({
+  powerPreference: 'high-performance',
+  antialias: false,
+  stencil: false
+});
+const DPR = Math.min(window.devicePixelRatio || 1, 1.5);
+renderer.setPixelRatio(DPR);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.NoToneMapping; // Handled in final HDR composite pass
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+renderer.localClippingEnabled = true;
+document.body.appendChild(renderer.domElement);
+
+const gl = renderer.getContext();
+const hasHalfFloatRT = renderer.capabilities.isWebGL2 &&
+  Boolean(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
+const rtType = hasHalfFloatRT ? THREE.HalfFloatType : THREE.UnsignedByteType;
+const maxSamples = renderer.capabilities.isWebGL2 ? Math.min(4, renderer.capabilities.maxSamples || 0) : 0;
+
+const scene = new THREE.Scene();
+const FOG_COLOR = new THREE.Color(0x060918);
+const FOG_DENSITY = 0.0088;
+scene.fog = new THREE.FogExp2(FOG_COLOR.getHex(), FOG_DENSITY);
+
+const camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.4, 520);
+const reflCamera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.4, 520);
+
+// ---------------------------------------------------------------------------
+// 2. RENDER TARGETS (PLANAR REFLECTION + HDR MULTI-PASS BLOOM)
+// ---------------------------------------------------------------------------
+function makeRT(w, h, opts = {}) {
+  return new THREE.WebGLRenderTarget(Math.max(1, w), Math.max(1, h), {
+    type: rtType,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat,
+    generateMipmaps: false,
+    depthBuffer: opts.depth !== false,
+    stencilBuffer: false,
+    samples: opts.samples || 0
+  });
+}
+
+let rtW = Math.floor(window.innerWidth * DPR);
+let rtH = Math.floor(window.innerHeight * DPR);
+
+const sceneRT = makeRT(rtW, rtH, { samples: maxSamples });
+const reflRT = makeRT(Math.floor(rtW * 0.5), Math.floor(rtH * 0.5));
+const brightRT = makeRT(Math.floor(rtW * 0.5), Math.floor(rtH * 0.5), { depth: false });
+const bloom1A = makeRT(Math.floor(rtW * 0.25), Math.floor(rtH * 0.25), { depth: false });
+const bloom1B = makeRT(Math.floor(rtW * 0.25), Math.floor(rtH * 0.25), { depth: false });
+const bloom2A = makeRT(Math.floor(rtW * 0.125), Math.floor(rtH * 0.125), { depth: false });
+const bloom2B = makeRT(Math.floor(rtW * 0.125), Math.floor(rtH * 0.125), { depth: false });
+
+// Deterministic pseudo-random helper
+let seed = 4219;
+function rand() {
+  seed = (seed * 16807) % 2147483647;
+  return (seed - 1) / 2147483646;
+}
+function randRange(a, b) { return a + (b - a) * rand(); }
+
+// ---------------------------------------------------------------------------
+// 3. PROCEDURAL CANVAS TEXTURES (FACADES & NEON SIGNS)
+// ---------------------------------------------------------------------------
+function createFacadeTextures(paletteIdx) {
+  const w = 512, h = 512;
+  const colCanvas = document.createElement('canvas');
+  colCanvas.width = w; colCanvas.height = h;
+  const cCtx = colCanvas.getContext('2d');
+
+  const emCanvas = document.createElement('canvas');
+  emCanvas.width = w; emCanvas.height = h;
+  const eCtx = emCanvas.getContext('2d');
+
+  const rghCanvas = document.createElement('canvas');
+  rghCanvas.width = w; rghCanvas.height = h;
+  const rCtx = rghCanvas.getContext('2d');
+
+  // Base building material
+  cCtx.fillStyle = paletteIdx === 0 ? '#0c111e' : (paletteIdx === 1 ? '#11101d' : '#0b141a');
+  cCtx.fillRect(0, 0, w, h);
+  eCtx.fillStyle = '#000000';
+  eCtx.fillRect(0, 0, w, h);
+  rCtx.fillStyle = '#c8c8c8';
+  rCtx.fillRect(0, 0, w, h);
+
+  const cols = paletteIdx === 1 ? 16 : 24;
+  const rows = paletteIdx === 2 ? 40 : 32;
+  const cellW = w / cols;
+  const cellH = h / rows;
+
+  // Structural ribs
+  cCtx.fillStyle = '#060810';
+  for (let i = 0; i <= cols; i++) {
+    cCtx.fillRect(i * cellW - 1, 0, 2, h);
+  }
+  for (let j = 0; j <= rows; j++) {
+    cCtx.fillRect(0, j * cellH - 1.5, w, 3);
+  }
+
+  const palettes = [
+    ['#48e5ff', '#9bf0ff', '#ffd28a', '#ffffff', '#ff47a3'],
+    ['#ff3898', '#ff9e44', '#5ce1ff', '#b277ff', '#ffe8b5'],
+    ['#00f2ff', '#70a8ff', '#ffbb55', '#e4f4ff', '#ff2975']
+  ];
+  const pal = palettes[paletteIdx % palettes.length];
+
+  for (let r = 0; r < rows; r++) {
+    const floorLitProb = 0.28 + rand() * 0.42;
+    const isBandFloor = paletteIdx === 1 && (r % 6 === 0);
+    for (let c = 0; c < cols; c++) {
+      const padX = cellW * 0.18;
+      const padY = cellH * 0.22;
+      const wx = c * cellW + padX;
+      const wy = r * cellH + padY;
+      const ww = cellW - padX * 2;
+      const wh = cellH - padY * 2;
+
+      // Glass window roughness (smooth)
+      rCtx.fillStyle = '#222222';
+      rCtx.fillRect(wx, wy, ww, wh);
+
+      const isLit = isBandFloor ? (rand() < 0.72) : (rand() < floorLitProb);
+      if (isLit) {
+        const col = pal[Math.floor(rand() * pal.length)];
+        const intensity = 0.45 + rand() * 0.55;
+        const grad = eCtx.createLinearGradient(wx, wy, wx, wy + wh);
+        grad.addColorStop(0, col);
+        grad.addColorStop(1, '#101828');
+        eCtx.globalAlpha = intensity;
+        eCtx.fillStyle = grad;
+        eCtx.fillRect(wx, wy, ww, wh);
+
+        // Occasional window blinds / interior divider
+        if (rand() < 0.35) {
+          eCtx.fillStyle = '#000000';
+          eCtx.globalAlpha = 0.45;
+          eCtx.fillRect(wx, wy, ww, wh * 0.42);
+        }
+        eCtx.globalAlpha = 1.0;
+
+        cCtx.fillStyle = '#182438';
+        cCtx.fillRect(wx, wy, ww, wh);
+      } else {
+        cCtx.fillStyle = '#080d17';
+        cCtx.fillRect(wx, wy, ww, wh);
+      }
+    }
+  }
+
+  const makeTex = (canvas, isSRGB = false) => {
+    const t = new THREE.CanvasTexture(canvas);
+    t.wrapS = THREE.RepeatWrapping;
+    t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 4;
+    if (isSRGB) t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+
+  return {
+    map: makeTex(colCanvas, true),
+    emissiveMap: makeTex(emCanvas, true),
+    roughnessMap: makeTex(rghCanvas, false)
+  };
+}
+
+function drawCyberGlyph(ctx, x, y, size, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(3, size * 0.11);
+  ctx.lineCap = 'square';
+  ctx.beginPath();
+  const s = size * 0.4;
+  const style = Math.floor(rand() * 5);
+  if (style === 0) {
+    ctx.moveTo(-s, -s); ctx.lineTo(s, -s);
+    ctx.moveTo(0, -s); ctx.lineTo(0, s);
+    ctx.moveTo(-s * 0.8, 0); ctx.lineTo(s * 0.8, 0);
+    ctx.moveTo(-s, s); ctx.lineTo(s, s * 0.6);
+  } else if (style === 1) {
+    ctx.moveTo(-s, -s * 0.6); ctx.lineTo(s, -s * 0.6);
+    ctx.lineTo(s * 0.5, s);
+    ctx.moveTo(-s * 0.4, -s); ctx.lineTo(-s * 0.8, s);
+  } else if (style === 2) {
+    ctx.strokeRect(-s * 0.75, -s * 0.75, s * 1.5, s * 1.2);
+    ctx.moveTo(0, -s); ctx.lineTo(0, s);
+    ctx.moveTo(-s, s * 0.9); ctx.lineTo(s, s * 0.9);
+  } else if (style === 3) {
+    ctx.moveTo(-s, -s); ctx.lineTo(s, -s * 0.2); ctx.lineTo(-s * 0.4, s);
+    ctx.moveTo(s * 0.3, s * 0.1); ctx.lineTo(s, s);
+  } else {
+    ctx.moveTo(-s, 0); ctx.lineTo(s, 0);
+    ctx.moveTo(-s * 0.6, -s); ctx.lineTo(-s * 0.6, s);
+    ctx.moveTo(s * 0.6, -s); ctx.lineTo(s * 0.6, s * 0.5);
+    ctx.lineTo(0, s);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function createNeonSignTexture(kind) {
+  const isVertical = kind % 2 === 0;
+  const w = isVertical ? 256 : 512;
+  const h = isVertical ? 512 : 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#03050a';
+  ctx.fillRect(0, 0, w, h);
+
+  const schemes = [
+    ['#00f5ff', '#ff1b8d'],
+    ['#ff2288', '#ffb800'],
+    ['#00ffaa', '#00aaff'],
+    ['#a855ff', '#00f0ff'],
+    ['#ff7700', '#ff1155'],
+    ['#00e5ff', '#ffffff']
+  ];
+  const [c1, c2] = schemes[kind % schemes.length];
+
+  // Outer glowing border
+  ctx.strokeStyle = c1;
+  ctx.lineWidth = 8;
+  ctx.strokeRect(10, 10, w - 20, h - 20);
+  ctx.strokeStyle = c2;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(22, 22, w - 44, h - 44);
+
+  // Subtle scanlines background
+  ctx.fillStyle = c1;
+  ctx.globalAlpha = 0.08;
+  for (let y = 26; y < h - 26; y += 8) {
+    ctx.fillRect(26, y, w - 52, 3);
+  }
+  ctx.globalAlpha = 1.0;
+
+  if (isVertical) {
+    const glyphCount = 4;
+    const step = (h - 90) / glyphCount;
+    for (let i = 0; i < glyphCount; i++) {
+      drawCyberGlyph(ctx, w * 0.5, 65 + step * (i + 0.45), 95, i % 2 === 0 ? c1 : c2);
+    }
+    ctx.fillStyle = c2;
+    ctx.fillRect(42, h - 50, w - 84, 12);
+  } else {
+    const words = ['SYNTH//09', 'CYBERNET', 'NEON-X', 'APEX 2099', 'KINETIC', 'ORBITAL'];
+    const label = words[kind % words.length];
+    ctx.font = 'bold 68px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = c1;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, w * 0.5, h * 0.46);
+    ctx.shadowBlur = 0;
+
+    // Accent bar + cyber glyphs
+    ctx.fillStyle = c2;
+    ctx.fillRect(46, h * 0.72, w * 0.55, 14);
+    drawCyberGlyph(ctx, w * 0.8, h * 0.75, 48, c1);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+// ---------------------------------------------------------------------------
+// 4. SKY DOME & ATMOSPHERIC LIGHTING
+// ---------------------------------------------------------------------------
+const skyGeo = new THREE.SphereGeometry(420, 32, 20);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  depthWrite: false,
+  fog: false,
+  uniforms: {
+    uTime: { value: 0 },
+    uFogColor: { value: FOG_COLOR }
+  },
+  vertexShader: `
+    varying vec3 vWorldDir;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorldDir = normalize(position);
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    uniform vec3 uFogColor;
+    varying vec3 vWorldDir;
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+    }
+    float noise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+                 mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+    }
+    float fbm(vec2 p) {
+      float v = 0.0;
+      float a = 0.5;
+      for (int i = 0; i < 4; i++) {
+        v += a * noise(p);
+        p *= 2.04;
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    void main() {
+      vec3 d = normalize(vWorldDir);
+      float h = clamp(d.y, 0.0, 1.0);
+
+      vec3 zenith = vec3(0.008, 0.014, 0.045);
+      vec3 midSky = vec3(0.025, 0.035, 0.10);
+      vec3 horizonGlow = vec3(0.09, 0.03, 0.14);
+
+      vec3 col = mix(horizonGlow, midSky, smoothstep(0.0, 0.25, h));
+      col = mix(col, zenith, smoothstep(0.2, 0.8, h));
+
+      // City light pollution clouds
+      if (d.y > 0.01) {
+        vec2 uv = d.xz / (d.y + 0.18) * 1.4;
+        float n = fbm(uv + vec2(uTime * 0.012, -uTime * 0.008));
+        float angleGlow = 0.5 + 0.5 * sin(atan(d.z, d.x) * 3.0 + 1.0);
+        vec3 cloudTint = mix(vec3(0.0, 0.35, 0.55), vec3(0.55, 0.05, 0.35), angleGlow);
+        col += cloudTint * n * smoothstep(0.55, 0.05, h) * 0.22;
+      }
+
+      // Seamless blend into exponential fog near horizon
+      col = mix(uFogColor, col, smoothstep(0.0, 0.16, h));
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+});
+const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+scene.add(skyMesh);
+
+scene.add(new THREE.AmbientLight(0x1b2750, 1.1));
+scene.add(new THREE.HemisphereLight(0x3660c8, 0x260c38, 1.1));
+
+const moonLight = new THREE.DirectionalLight(0x6699ff, 0.85);
+moonLight.position.set(80, 140, -60);
+scene.add(moonLight);
+
+// Dynamic street lights moving ahead of the camera for wet facade speculars
+const streetLightA = new THREE.PointLight(0x00f0ff, 26, 48, 1.4);
+const streetLightB = new THREE.PointLight(0xff1a8c, 26, 48, 1.4);
+scene.add(streetLightA, streetLightB);
+
+// ---------------------------------------------------------------------------
+// 5. WET ASPHALT GROUND WITH PLANAR REFLECTIONS & RAIN RIPPLES
+// ---------------------------------------------------------------------------
+const reflTextureMatrix = new THREE.Matrix4();
+const biasMatrix = new THREE.Matrix4().set(
+  0.5, 0.0, 0.0, 0.5,
+  0.0, 0.5, 0.0, 0.5,
+  0.0, 0.0, 0.5, 0.5,
+  0.0, 0.0, 0.0, 1.0
+);
+
+const groundGeo = new THREE.PlaneGeometry(540, 540, 1, 1);
+groundGeo.rotateX(-Math.PI / 2);
+
+const groundMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uReflMap: { value: reflRT.texture },
+    uReflMatrix: { value: reflTextureMatrix },
+    uTime: { value: 0 },
+    uFogColor: { value: FOG_COLOR },
+    uFogDensity: { value: FOG_DENSITY }
+  },
+  vertexShader: `
+    uniform mat4 uReflMatrix;
+    varying vec3 vWorldPos;
+    varying vec4 vReflCoord;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      vReflCoord = uReflMatrix * wp;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D uReflMap;
+    uniform float uTime;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+
+    varying vec3 vWorldPos;
+    varying vec4 vReflCoord;
+
+    float hash21(vec2 p) {
+      p = fract(p * vec2(234.34, 435.345));
+      p += dot(p, p + 34.23);
+      return fract(p.x * p.y);
+    }
+
+    float noise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(
+        mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
+        mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x),
+        f.y
+      );
+    }
+
+    float fbm(vec2 p) {
+      float v = 0.0;
+      float a = 0.5;
+      for (int i = 0; i < 4; i++) {
+        v += a * noise(p);
+        p *= 2.05;
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    // Concentric raindrop ripples
+    vec2 rainRipples(vec2 uv, float t) {
+      vec2 total = vec2(0.0);
+      for (int k = 0; k < 2; k++) {
+        float scale = k == 0 ? 1.35 : 2.1;
+        vec2 p = uv * scale;
+        vec2 cell = floor(p);
+        vec2 f = fract(p) - 0.5;
+        float h = hash21(cell + float(k) * 19.7);
+        float life = fract(t * (0.85 + h * 0.45) + h * 6.28);
+        vec2 center = vec2(hash21(cell + 3.1), hash21(cell + 7.9)) - 0.5;
+        vec2 diff = f - center * 0.45;
+        float d = length(diff);
+        float ring = sin((d - life * 0.48) * 38.0) * exp(-d * 7.5) * (1.0 - life);
+        float mask = smoothstep(0.48, 0.05, d);
+        total += normalize(diff + 0.0001) * ring * mask;
+      }
+      return total;
+    }
+
+    void main() {
+      vec2 xz = vWorldPos.xz;
+      float distToCam = length(cameraPosition - vWorldPos);
+      vec3 viewDir = normalize(cameraPosition - vWorldPos);
+
+      float r = length(xz);
+      float theta = atan(xz.y, xz.x);
+
+      // Circular boulevard road at R = 51..69
+      float isRoad = smoothstep(50.2, 50.8, r) * (1.0 - smoothstep(69.2, 69.8, r));
+      float curb = smoothstep(49.5, 50.0, r) * (1.0 - smoothstep(50.5, 51.0, r))
+                 + smoothstep(69.0, 69.5, r) * (1.0 - smoothstep(70.0, 70.5, r));
+
+      // Road lane markings
+      float dash = step(0.45, fract(theta * 48.0 / 6.2831853));
+      float centerLine = smoothstep(0.18, 0.06, abs(r - 60.0)) * dash;
+      float sideLines = smoothstep(0.16, 0.05, abs(r - 52.0))
+                      + smoothstep(0.16, 0.05, abs(r - 68.0));
+
+      // Asphalt grain & sidewalk tile grid
+      float grain = noise(xz * 3.8) * 0.5 + noise(xz * 12.0) * 0.5;
+      float tile = smoothstep(0.04, 0.0, abs(fract(xz.x * 0.45) - 0.5))
+                 + smoothstep(0.04, 0.0, abs(fract(xz.y * 0.45) - 0.5));
+
+      vec3 asphaltCol = mix(vec3(0.018, 0.022, 0.036), vec3(0.028, 0.032, 0.048), grain);
+      vec3 sidewalkCol = mix(vec3(0.024, 0.028, 0.045), vec3(0.014, 0.016, 0.026), clamp(tile, 0.0, 1.0));
+
+      vec3 baseCol = mix(sidewalkCol, asphaltCol, isRoad);
+      baseCol += vec3(0.14, 0.45, 0.55) * sideLines * 0.35;
+      baseCol += vec3(0.55, 0.42, 0.14) * centerLine * 0.45;
+      baseCol += vec3(0.03, 0.05, 0.09) * curb;
+
+      // Puddles via FBM
+      float puddleNoise = fbm(xz * 0.075 + vec2(3.1, 7.4));
+      float puddle = smoothstep(0.42, 0.58, puddleNoise);
+      float wetness = mix(0.28, 1.0, puddle);
+
+      // Rain ripples inside puddles, micro-roughness outside
+      vec2 ripple = rainRipples(xz, uTime) * puddle * 0.022;
+      vec2 microBump = (vec2(noise(xz * 7.0), noise(xz * 7.0 + 13.7)) - 0.5) * (1.0 - puddle) * 0.024;
+
+      vec2 reflUV = vReflCoord.xy / max(vReflCoord.w, 0.0001);
+      vec2 distortedUV = clamp(reflUV + ripple + microBump, 0.002, 0.998);
+
+      // Sample planar reflection (sharper in puddles, blurred on damp asphalt)
+      vec3 reflSharp = texture2D(uReflMap, distortedUV).rgb;
+      float blurOff = mix(0.0065, 0.0008, puddle);
+      vec3 reflBlur = (
+        texture2D(uReflMap, clamp(distortedUV + vec2( blurOff,  blurOff), 0.002, 0.998)).rgb +
+        texture2D(uReflMap, clamp(distortedUV + vec2(-blurOff,  blurOff), 0.002, 0.998)).rgb +
+        texture2D(uReflMap, clamp(distortedUV + vec2( blurOff, -blurOff), 0.002, 0.998)).rgb +
+        texture2D(uReflMap, clamp(distortedUV + vec2(-blurOff, -blurOff), 0.002, 0.998)).rgb
+      ) * 0.25;
+
+      vec3 reflection = mix(reflBlur, reflSharp, puddle);
+
+      // Fresnel reflectance on wet surface
+      float ndv = clamp(dot(vec3(0.0, 1.0, 0.0), viewDir), 0.0, 1.0);
+      float fresnel = mix(0.18, 0.96, pow(1.0 - ndv, 3.4));
+      float reflStrength = fresnel * mix(0.45, 0.95, wetness);
+
+      // Slight darkening of base where soaked
+      vec3 col = baseCol * mix(1.0, 0.55, puddle) + reflection * reflStrength;
+
+      // Exponential squared fog matching scene.fog
+      float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * distToCam * distToCam);
+      col = mix(col, uFogColor, clamp(fogFactor, 0.0, 1.0));
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+});
+
+const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+groundMesh.position.y = 0;
+scene.add(groundMesh);
+
+// ---------------------------------------------------------------------------
+// 6. PROCEDURAL CYBERPUNK CITY (INSTANCED SKYSCRAPERS, SIGNS, BRIDGES, LAMPS)
+// ---------------------------------------------------------------------------
+function makeBuildingMaterials(paletteIdx) {
+  const tex = createFacadeTextures(paletteIdx);
+  const sideMat = new THREE.MeshStandardMaterial({
+    map: tex.map,
+    emissiveMap: tex.emissiveMap,
+    emissive: new THREE.Color(0xffffff),
+    emissiveIntensity: 2.1,
+    roughnessMap: tex.roughnessMap,
+    roughness: 0.45,
+    metalness: 0.65
+  });
+
+  sideMat.customProgramCacheKey = () => `cyber-facade-${paletteIdx}`;
+  sideMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         varying float vFacadeSeed;`
+      )
+      .replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>
+         #ifdef USE_INSTANCING
+           vec3 fScale = vec3(
+             length(instanceMatrix[0].xyz),
+             length(instanceMatrix[1].xyz),
+             length(instanceMatrix[2].xyz)
+           );
+           float faceW = abs(normal.x) > 0.5 ? fScale.z : fScale.x;
+           float faceH = fScale.y;
+           vFacadeSeed = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9898, 78.233))) * 43758.5453);
+           vec2 tiledUv = uv * vec2(
+             max(1.0, floor(faceW * 0.13 + 0.5)),
+             max(1.0, floor(faceH * 0.075 + 0.5))
+           );
+           tiledUv.x += floor(vFacadeSeed * 6.0) * 0.25;
+           #ifdef USE_MAP
+             vMapUv = tiledUv;
+           #endif
+           #ifdef USE_EMISSIVEMAP
+             vEmissiveMapUv = tiledUv;
+           #endif
+           #ifdef USE_ROUGHNESSMAP
+             vRoughnessMapUv = tiledUv;
+           #endif
+         #else
+           vFacadeSeed = 0.0;
+         #endif`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         varying float vFacadeSeed;`
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+         vec3 tintShift = mix(vec3(0.85, 1.05, 1.15), vec3(1.15, 0.9, 1.05), vFacadeSeed);
+         totalEmissiveRadiance *= tintShift;`
+      );
+  };
+
+  const roofMat = new THREE.MeshStandardMaterial({
+    color: 0x090d18,
+    roughness: 0.75,
+    metalness: 0.5
+  });
+
+  // BoxGeometry face order: +x, -x, +y (top), -y (bottom), +z, -z
+  return [sideMat, sideMat, roofMat, roofMat, sideMat, sideMat];
+}
+
+const buildingGroups = [[], [], []];
+const neonTrims = [];
+const beacons = [];
+const signPlacements = [];
+
+function addTower(x, z, w, d, h, rotY, styleIdx) {
+  buildingGroups[styleIdx].push({ x, y: h * 0.5, z, sx: w, sy: h, sz: d, ry: rotY });
+
+  // Upper setback tier on taller towers
+  if (h > 42) {
+    const h2 = h * randRange(0.28, 0.45);
+    const w2 = w * randRange(0.55, 0.72);
+    const d2 = d * randRange(0.55, 0.72);
+    const y2 = h + h2 * 0.5;
+    buildingGroups[(styleIdx + 1) % 3].push({ x, y: y2, z, sx: w2, sy: h2, sz: d2, ry: rotY });
+
+    const topH = h + h2;
+    // Neon roof trim ring
+    if (rand() < 0.78) {
+      neonTrims.push({
+        x, y: topH + 0.15, z,
+        sx: w2 * 1.02, sy: 0.35, sz: d2 * 1.02,
+        ry: rotY,
+        color: rand() < 0.5 ? 0x00f2ff : (rand() < 0.7 ? 0xff1c8e : 0xffaa22)
+      });
+    }
+    // Spire + blinking aviation beacon
+    if (topH > 72 && rand() < 0.65) {
+      const spireH = randRange(8, 22);
+      buildingGroups[0].push({ x, y: topH + spireH * 0.5, z, sx: 0.45, sy: spireH, sz: 0.45, ry: rotY });
+      beacons.push({ x, y: topH + spireH + 0.4, z, phase: rand() * Math.PI * 2 });
+    }
+  } else if (rand() < 0.55) {
+    neonTrims.push({
+      x, y: h + 0.12, z,
+      sx: w * 1.01, sy: 0.3, sz: d * 1.01,
+      ry: rotY,
+      color: rand() < 0.5 ? 0x00e5ff : 0xff2a85
+    });
+  }
+}
+
+// 1) Canyon-lining buildings (inner ring R = 37..45, outer ring R = 75..85)
+function populateRing(count, rMin, rMax, hMin, hMax, faceOutward) {
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + randRange(-0.018, 0.018);
+    const r = randRange(rMin, rMax);
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    const w = randRange(7.5, 13.5);
+    const d = randRange(7.5, 13.5);
+    const h = randRange(hMin, hMax);
+    const rotY = -a + randRange(-0.12, 0.12);
+    const style = Math.floor(rand() * 3);
+    addTower(x, z, w, d, h, rotY, style);
+
+    // Neon signs facing the boulevard (R ~ 60)
+    const signCount = rand() < 0.85 ? (rand() < 0.5 ? 2 : 1) : 0;
+    for (let s = 0; s < signCount; s++) {
+      const dirToRoad = faceOutward ? 1 : -1;
+      const offsetR = (w * 0.5 + 0.55) * dirToRoad;
+      const sx = x + Math.cos(a) * offsetR;
+      const sz = z + Math.sin(a) * offsetR;
+      const sy = randRange(7, Math.min(h - 4, 34));
+      const kind = Math.floor(rand() * 12);
+      const isVert = kind % 2 === 0;
+      signPlacements.push({
+        x: sx,
+        y: sy,
+        z: sz,
+        w: isVert ? randRange(2.4, 3.8) : randRange(5.2, 8.0),
+        h: isVert ? randRange(6.5, 11.5) : randRange(2.8, 4.2),
+        ry: -a + (faceOutward ? Math.PI * 0.5 : -Math.PI * 0.5),
+        kind,
+        flickerSeed: rand() * 100
+      });
+    }
+  }
+}
+
+// Inner canyon wall & core megatowers
+populateRing(30, 38, 45, 34, 88, true);
+populateRing(18, 22, 33, 55, 125, true);
+for (let i = 0; i < 8; i++) {
+  const a = (i / 8) * Math.PI * 2 + 0.2;
+  const r = randRange(4, 16);
+  addTower(Math.cos(a) * r, Math.sin(a) * r, randRange(10, 16), randRange(10, 16), randRange(95, 165), -a, i % 3);
+}
+
+// Outer canyon wall & distant skyline
+populateRing(44, 75, 83, 36, 94, false);
+populateRing(46, 92, 118, 52, 138, false);
+populateRing(54, 128, 175, 65, 175, false);
+
+// Build instanced meshes for towers
+const unitBox = new THREE.BoxGeometry(1, 1, 1);
+const dummy = new THREE.Object3D();
+
+buildingGroups.forEach((list, idx) => {
+  if (!list.length) return;
+  const mats = makeBuildingMaterials(idx);
+  const im = new THREE.InstancedMesh(unitBox, mats, list.length);
+  list.forEach((b, i) => {
+    dummy.position.set(b.x, b.y, b.z);
+    dummy.rotation.set(0, b.ry, 0);
+    dummy.scale.set(b.sx, b.sy, b.sz);
+    dummy.updateMatrix();
+    im.setMatrixAt(i, dummy.matrix);
+  });
+  im.instanceMatrix.needsUpdate = true;
+  scene.add(im);
+});
+
+// Neon trims (roof edges & vertical light strips)
+const trimMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const trimIM = new THREE.InstancedMesh(unitBox, trimMat, neonTrims.length);
+const tmpCol = new THREE.Color();
+neonTrims.forEach((t, i) => {
+  dummy.position.set(t.x, t.y, t.z);
+  dummy.rotation.set(0, t.ry, 0);
+  dummy.scale.set(t.sx, t.sy, t.sz);
+  dummy.updateMatrix();
+  trimIM.setMatrixAt(i, dummy.matrix);
+  tmpCol.setHex(t.color).multiplyScalar(2.6);
+  trimIM.setColorAt(i, tmpCol);
+});
+trimIM.instanceMatrix.needsUpdate = true;
+if (trimIM.instanceColor) trimIM.instanceColor.needsUpdate = true;
+scene.add(trimIM);
+
+// Aviation red beacons on tall spires
+const beaconGeo = new THREE.SphereGeometry(0.42, 8, 6);
+const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const beaconIM = new THREE.InstancedMesh(beaconGeo, beaconMat, beacons.length);
+beacons.forEach((b, i) => {
+  dummy.position.set(b.x, b.y, b.z);
+  dummy.rotation.set(0, 0, 0);
+  dummy.scale.set(1, 1, 1);
+  dummy.updateMatrix();
+  beaconIM.setMatrixAt(i, dummy.matrix);
+  beaconIM.setColorAt(i, new THREE.Color(3.5, 0.15, 0.15));
+});
+beaconIM.instanceMatrix.needsUpdate = true;
+if (beaconIM.instanceColor) beaconIM.instanceColor.needsUpdate = true;
+scene.add(beaconIM);
+
+// Neon signs & holographic billboards
+const signTextures = Array.from({ length: 12 }, (_, k) => createNeonSignTexture(k));
+const signMats = signTextures.map((tex, k) => new THREE.ShaderMaterial({
+  transparent: true,
+  side: THREE.DoubleSide,
+  uniforms: {
+    uMap: { value: tex },
+    uTime: { value: 0 },
+    uSeed: { value: k * 1.73 },
+    uFogColor: { value: FOG_COLOR },
+    uFogDensity: { value: FOG_DENSITY }
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    void main() {
+      vUv = uv;
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D uMap;
+    uniform float uTime;
+    uniform float uSeed;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    void main() {
+      vec4 tex = texture2D(uMap, vUv);
+      float scan = 0.88 + 0.12 * sin(vUv.y * 120.0 - uTime * 8.0 + uSeed);
+      float pulse = 0.92 + 0.08 * sin(uTime * 2.5 + uSeed * 4.0);
+      // Occasional subtle neon flicker
+      float flick = smoothstep(0.02, 0.08, fract(sin(floor(uTime * 14.0) * 19.3 + uSeed) * 4375.5));
+      float mult = (2.6 + 0.5 * flick) * scan * pulse;
+      vec3 col = tex.rgb * mult;
+
+      float d = length(cameraPosition - vWorldPos);
+      float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * d * d);
+      col = mix(col, uFogColor, clamp(fogFactor, 0.0, 1.0));
+      gl_FragColor = vec4(col, 0.95);
+    }
+  `
+}));
+
+const signGeo = new THREE.PlaneGeometry(1, 1);
+signPlacements.forEach((s) => {
+  const m = new THREE.Mesh(signGeo, signMats[s.kind]);
+  m.position.set(s.x, s.y, s.z);
+  m.rotation.y = s.ry;
+  m.scale.set(s.w, s.h, 1);
+  scene.add(m);
+});
+
+// Overhead skybridges / monorail arches spanning across the boulevard (above camera path!)
+const bridgeMat = new THREE.MeshStandardMaterial({ color: 0x0b101d, roughness: 0.5, metalness: 0.75 });
+const bridgeCount = 6;
+const bridgeIM = new THREE.InstancedMesh(unitBox, bridgeMat, bridgeCount);
+const bridgeNeonIM = new THREE.InstancedMesh(unitBox, trimMat, bridgeCount * 2);
+
+for (let i = 0; i < bridgeCount; i++) {
+  const a = (i / bridgeCount) * Math.PI * 2 + 0.25;
+  const rMid = 60;
+  const y = 24.5 + (i % 2) * 5.0;
+  const x = Math.cos(a) * rMid;
+  const z = Math.sin(a) * rMid;
+
+  dummy.position.set(x, y, z);
+  dummy.rotation.set(0, -a, 0);
+  dummy.scale.set(34, 2.4, 3.6);
+  dummy.updateMatrix();
+  bridgeIM.setMatrixAt(i, dummy.matrix);
+
+  // Twin glowing neon strips under/along the bridge
+  for (let side = 0; side < 2; side++) {
+    const off = side === 0 ? 1.85 : -1.85;
+    dummy.position.set(x - Math.sin(a) * off, y - 0.8, z + Math.cos(a) * off);
+    dummy.rotation.set(0, -a, 0);
+    dummy.scale.set(33, 0.28, 0.28);
+    dummy.updateMatrix();
+    const idx = i * 2 + side;
+    bridgeNeonIM.setMatrixAt(idx, dummy.matrix);
+    const col = i % 2 === 0 ? new THREE.Color(0.0, 3.2, 3.6) : new THREE.Color(3.6, 0.2, 1.8);
+    bridgeNeonIM.setColorAt(idx, col);
+  }
+}
+bridgeIM.instanceMatrix.needsUpdate = true;
+bridgeNeonIM.instanceMatrix.needsUpdate = true;
+if (bridgeNeonIM.instanceColor) bridgeNeonIM.instanceColor.needsUpdate = true;
+scene.add(bridgeIM, bridgeNeonIM);
+
+// Street neon lamps along both sides of the circular road (R = 50.2 and R = 69.8)
+const lampTotal = 56;
+const lampPoleIM = new THREE.InstancedMesh(unitBox, bridgeMat, lampTotal);
+const lampHeadIM = new THREE.InstancedMesh(unitBox, trimMat, lampTotal);
+for (let i = 0; i < lampTotal; i++) {
+  const isOuter = i % 2 === 0;
+  const idxRing = Math.floor(i / 2);
+  const a = (idxRing / (lampTotal * 0.5)) * Math.PI * 2 + (isOuter ? 0 : 0.06);
+  const r = isOuter ? 69.6 : 50.4;
+  const x = Math.cos(a) * r;
+  const z = Math.sin(a) * r;
+
+  dummy.position.set(x, 3.8, z);
+  dummy.rotation.set(0, -a, 0);
+  dummy.scale.set(0.28, 7.6, 0.28);
+  dummy.updateMatrix();
+  lampPoleIM.setMatrixAt(i, dummy.matrix);
+
+  const armDir = isOuter ? -1 : 1;
+  dummy.position.set(x + Math.cos(a) * armDir * 1.1, 7.5, z + Math.sin(a) * armDir * 1.1);
+  dummy.rotation.set(0, -a, 0);
+  dummy.scale.set(2.2, 0.24, 0.45);
+  dummy.updateMatrix();
+  lampHeadIM.setMatrixAt(i, dummy.matrix);
+
+  const lCol = (idxRing % 3 === 0)
+    ? new THREE.Color(3.8, 0.35, 2.0)
+    : new THREE.Color(0.2, 3.2, 4.0);
+  lampHeadIM.setColorAt(i, lCol);
+}
+lampPoleIM.instanceMatrix.needsUpdate = true;
+lampHeadIM.instanceMatrix.needsUpdate = true;
+if (lampHeadIM.instanceColor) lampHeadIM.instanceColor.needsUpdate = true;
+scene.add(lampPoleIM, lampHeadIM);
+
+// ---------------------------------------------------------------------------
+// 7. VOLUMETRIC SEARCHLIGHTS IN THE FOGGY SKY
+// ---------------------------------------------------------------------------
+const beamGeo = new THREE.ConeGeometry(11, 140, 20, 1, true);
+beamGeo.translate(0, 70, 0);
+// Invert cone so base is at roof and widens upwards
+beamGeo.rotateX(Math.PI);
+beamGeo.translate(0, 140, 0);
+
+const beamMat = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide,
+  fog: false,
+  uniforms: {
+    uColor: { value: new THREE.Color(0x00d8ff) }
+  },
+  vertexShader: `
+    varying vec3 vNormalView;
+    varying vec3 vViewPos;
+    varying float vLocalY;
+    void main() {
+      vLocalY = position.y / 140.0;
+      vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+      vViewPos = -mvPos.xyz;
+      vNormalView = normalize(normalMatrix * normal);
+      gl_Position = projectionMatrix * mvPos;
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 uColor;
+    varying vec3 vNormalView;
+    varying vec3 vViewPos;
+    varying float vLocalY;
+    void main() {
+      vec3 V = normalize(vViewPos);
+      float edge = pow(abs(dot(normalize(vNormalView), V)), 2.2);
+      float fadeY = smoothstep(0.0, 0.12, vLocalY) * smoothstep(1.0, 0.15, vLocalY);
+      float alpha = edge * fadeY * 0.16;
+      gl_FragColor = vec4(uColor * alpha * 2.2, alpha);
+    }
+  `
+});
+
+const searchlights = [];
+for (let i = 0; i < 6; i++) {
+  const a = (i / 6) * Math.PI * 2 + 0.4;
+  const r = i % 2 === 0 ? 28 : 88;
+  const m = new THREE.Mesh(beamGeo, beamMat.clone());
+  m.material.uniforms.uColor.value.setHex(i % 2 === 0 ? 0x00e5ff : 0xc030ff);
+  m.position.set(Math.cos(a) * r, 40 + (i % 3) * 14, Math.sin(a) * r);
+  scene.add(m);
+  searchlights.push({ mesh: m, phase: i * 1.3, baseA: a });
+}
+
+// ---------------------------------------------------------------------------
+// 8. FLYING CARS & RIBBON LIGHT TRAILS
+// ---------------------------------------------------------------------------
+const CAR_COUNT = 56;
+const TRAIL_STEPS = 28;
+
+const carBodyGeo = new THREE.BoxGeometry(1.15, 0.42, 2.7);
+const carBodyMat = new THREE.MeshStandardMaterial({
+  color: 0x0d1222,
+  roughness: 0.28,
+  metalness: 0.85
+});
+const carBodyIM = new THREE.InstancedMesh(carBodyGeo, carBodyMat, CAR_COUNT);
+
+const carLightGeo = new THREE.BoxGeometry(0.95, 0.16, 0.22);
+const carLightIM = new THREE.InstancedMesh(carLightGeo, trimMat, CAR_COUNT * 2);
+scene.add(carBodyIM, carLightIM);
+
+const cars = [];
+for (let i = 0; i < CAR_COUNT; i++) {
+  const isUpper = i < 44;
+  const radius = isUpper ? randRange(25, 92) : randRange(53.5, 66.5);
+  const alt = isUpper ? randRange(28, 82) : randRange(20.5, 24.0);
+  const dir = (i % 2 === 0) ? 1 : -1;
+  const speed = (isUpper ? randRange(16, 28) : randRange(13, 21)) / radius * dir;
+  const isCyanTrail = i % 3 === 0;
+  const trailColor = isCyanTrail
+    ? new THREE.Color(0.15, 2.8, 3.6)
+    : (i % 2 === 0 ? new THREE.Color(3.8, 0.25, 1.3) : new THREE.Color(3.8, 1.1, 0.18));
+
+  cars.push({
+    radius,
+    baseAlt: alt,
+    angle: rand() * Math.PI * 2,
+    speed,
+    wobblePhase: rand() * Math.PI * 2,
+    wobbleFreq: randRange(0.7, 1.6),
+    trailColor,
+    history: []
+  });
+
+  // Front headlights (white/cyan), Rear thrusters (trailColor)
+  carLightIM.setColorAt(i * 2, new THREE.Color(2.5, 3.2, 4.0));
+  carLightIM.setColorAt(i * 2 + 1, trailColor);
+}
+if (carLightIM.instanceColor) carLightIM.instanceColor.needsUpdate = true;
+
+// Single dynamic BufferGeometry for all car ribbon light trails
+const totalTrailVerts = CAR_COUNT * TRAIL_STEPS * 2;
+const trailPositions = new Float32Array(totalTrailVerts * 3);
+const trailColors = new Float32Array(totalTrailVerts * 3);
+const trailIndices = [];
+for (let c = 0; c < CAR_COUNT; c++) {
+  const base = c * TRAIL_STEPS * 2;
+  for (let s = 0; s < TRAIL_STEPS - 1; s++) {
+    const a = base + s * 2;
+    const b = a + 1;
+    const d = a + 2;
+    const e = a + 3;
+    trailIndices.push(a, b, d, b, e, d);
+  }
+}
+
+const trailGeo = new THREE.BufferGeometry();
+const trailPosAttr = new THREE.BufferAttribute(trailPositions, 3);
+trailPosAttr.setUsage(THREE.DynamicDrawUsage);
+const trailColAttr = new THREE.BufferAttribute(trailColors, 3);
+trailColAttr.setUsage(THREE.DynamicDrawUsage);
+trailGeo.setAttribute('position', trailPosAttr);
+trailGeo.setAttribute('color', trailColAttr);
+trailGeo.setIndex(trailIndices);
+
+const trailMat = new THREE.MeshBasicMaterial({
+  vertexColors: true,
+  transparent: true,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  side: THREE.DoubleSide
+});
+const trailMesh = new THREE.Mesh(trailGeo, trailMat);
+trailMesh.frustumCulled = false;
+scene.add(trailMesh);
+
+const tmpPos = new THREE.Vector3();
+const tmpDir = new THREE.Vector3();
+const tmpSide = new THREE.Vector3();
+const upVec = new THREE.Vector3(0, 1, 0);
+
+function stepCars(dt, recordHistory) {
+  for (let i = 0; i < CAR_COUNT; i++) {
+    const c = cars[i];
+    c.angle += c.speed * dt;
+    const r = c.radius + Math.sin(c.angle * 2.0 + c.wobblePhase) * 2.2;
+    const y = c.baseAlt + Math.sin(c.angle * c.wobbleFreq + c.wobblePhase) * 1.8;
+    const x = Math.cos(c.angle) * r;
+    const z = Math.sin(c.angle) * r;
+
+    // Velocity tangent direction
+    const sign = c.speed >= 0 ? 1 : -1;
+    const yaw = -c.angle + (sign > 0 ? 0 : Math.PI);
+
+    dummy.position.set(x, y, z);
+    dummy.rotation.set(0, yaw, sign * -0.14);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    carBodyIM.setMatrixAt(i, dummy.matrix);
+
+    // Front & rear light bars in local car space
+    const fwdX = -Math.sin(c.angle) * sign;
+    const fwdZ = Math.cos(c.angle) * sign;
+    dummy.position.set(x + fwdX * 1.32, y, z + fwdZ * 1.32);
+    dummy.rotation.set(0, yaw, sign * -0.14);
+    dummy.updateMatrix();
+    carLightIM.setMatrixAt(i * 2, dummy.matrix);
+
+    const rearX = x - fwdX * 1.34;
+    const rearZ = z - fwdZ * 1.34;
+    dummy.position.set(rearX, y, rearZ);
+    dummy.updateMatrix();
+    carLightIM.setMatrixAt(i * 2 + 1, dummy.matrix);
+
+    if (recordHistory) {
+      c.history.unshift(new THREE.Vector3(rearX, y, rearZ));
+      if (c.history.length > TRAIL_STEPS) c.history.pop();
+    }
+  }
+  carBodyIM.instanceMatrix.needsUpdate = true;
+  carLightIM.instanceMatrix.needsUpdate = true;
+}
+
+function updateTrailGeometry() {
+  for (let c = 0; c < CAR_COUNT; c++) {
+    const car = cars[c];
+    const hist = car.history;
+    const col = car.trailColor;
+    const baseVert = c * TRAIL_STEPS * 2;
+
+    for (let s = 0; s < TRAIL_STEPS; s++) {
+      const p = hist[Math.min(s, hist.length - 1)];
+      const pPrev = hist[Math.max(0, s - 1)];
+      const pNext = hist[Math.min(hist.length - 1, s + 1)];
+
+      tmpDir.subVectors(pPrev, pNext);
+      if (tmpDir.lengthSq() < 1e-6) tmpDir.set(1, 0, 0);
+      else tmpDir.normalize();
+
+      tmpSide.crossVectors(tmpDir, upVec).normalize();
+
+      const t = 1.0 - s / (TRAIL_STEPS - 1);
+      const width = 0.34 * t;
+      const fade = Math.pow(t, 1.9);
+
+      const vi = (baseVert + s * 2) * 3;
+      trailPositions[vi]     = p.x - tmpSide.x * width;
+      trailPositions[vi + 1] = p.y - tmpSide.y * width;
+      trailPositions[vi + 2] = p.z - tmpSide.z * width;
+
+      trailPositions[vi + 3] = p.x + tmpSide.x * width;
+      trailPositions[vi + 4] = p.y + tmpSide.y * width;
+      trailPositions[vi + 5] = p.z + tmpSide.z * width;
+
+      trailColors[vi]     = col.r * fade;
+      trailColors[vi + 1] = col.g * fade;
+      trailColors[vi + 2] = col.b * fade;
+
+      trailColors[vi + 3] = col.r * fade;
+      trailColors[vi + 4] = col.g * fade;
+      trailColors[vi + 5] = col.b * fade;
+    }
+  }
+  trailPosAttr.needsUpdate = true;
+  trailColAttr.needsUpdate = true;
+}
+
+// Pre-warm car trails so trails are full-length on frame 1
+for (let k = 0; k < TRAIL_STEPS; k++) {
+  stepCars(0.055, true);
+}
+updateTrailGeometry();
+
+// ---------------------------------------------------------------------------
+// 9. ATMOSPHERIC RAIN STREAKS AROUND CAMERA
+// ---------------------------------------------------------------------------
+const RAIN_COUNT = 1600;
+const rainGeo = new THREE.BufferGeometry();
+const rainPos = new Float32Array(RAIN_COUNT * 2 * 3);
+const rainAttrSeed = new Float32Array(RAIN_COUNT * 2);
+const rainVertEnd = new Float32Array(RAIN_COUNT * 2);
+
+for (let i = 0; i < RAIN_COUNT; i++) {
+  const rx = (rand() - 0.5) * 64;
+  const ry = rand() * 34;
+  const rz = (rand() - 0.5) * 64;
+  const s = rand();
+  for (let v = 0; v < 2; v++) {
+    const idx = (i * 2 + v) * 3;
+    rainPos[idx] = rx;
+    rainPos[idx + 1] = ry;
+    rainPos[idx + 2] = rz;
+    rainAttrSeed[i * 2 + v] = s;
+    rainVertEnd[i * 2 + v] = v;
+  }
+}
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+rainGeo.setAttribute('aSeed', new THREE.BufferAttribute(rainAttrSeed, 1));
+rainGeo.setAttribute('aEnd', new THREE.BufferAttribute(rainVertEnd, 1));
+
+const rainMat = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  uniforms: {
+    uTime: { value: 0 },
+    uCamPos: { value: new THREE.Vector3() }
+  },
+  vertexShader: `
+    uniform float uTime;
+    uniform vec3 uCamPos;
+    attribute float aSeed;
+    attribute float aEnd;
+    varying float vAlpha;
+    void main() {
+      vec3 box = vec3(64.0, 34.0, 64.0);
+      vec3 p = position;
+      p.y -= uTime * (26.0 + aSeed * 12.0);
+      p.x += uTime * 2.4;
+      vec3 rel = mod(p - uCamPos + box * 0.5, box) - box * 0.5;
+      vec3 wp = uCamPos + rel;
+      // Stretch downward to form streak
+      wp += vec3(-0.08, -1.15, 0.0) * aEnd;
+      float distFade = 1.0 - smoothstep(10.0, 32.0, length(rel));
+      vAlpha = distFade * (0.14 + 0.16 * aSeed) * (1.0 - aEnd * 0.7);
+      gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+    }
+  `,
+  fragmentShader: `
+    varying float vAlpha;
+    void main() {
+      gl_FragColor = vec4(0.45, 0.85, 1.15, vAlpha);
+    }
+  `
+});
+const rainLines = new THREE.LineSegments(rainGeo, rainMat);
+rainLines.frustumCulled = false;
+scene.add(rainLines);
+
+// ---------------------------------------------------------------------------
+// 10. MULTI-PASS HDR BLOOM + ACES FILMIC COMPOSITE PIPELINE
+// ---------------------------------------------------------------------------
+const postScene = new THREE.Scene();
+const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const quadGeo = new THREE.PlaneGeometry(2, 2);
+
+const brightMat = new THREE.ShaderMaterial({
+  depthTest: false,
+  depthWrite: false,
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+    void main() {
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      float knee = 0.45;
+      float thresh = 0.88;
+      float soft = clamp((l - thresh + knee) / (2.0 * knee), 0.0, 1.0);
+      soft = soft * soft * (3.0 - 2.0 * soft);
+      float contrib = max(soft * 0.5, l - thresh) / max(l, 0.0001);
+      gl_FragColor = vec4(c * max(contrib, 0.0), 1.0);
+    }
+  `
+});
+
+const blurMat = new THREE.ShaderMaterial({
+  depthTest: false,
+  depthWrite: false,
+  uniforms: {
+    tDiffuse: { value: null },
+    uDirection: { value: new THREE.Vector2(1, 0) }
+  },
+  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform vec2 uDirection;
+    varying vec2 vUv;
+    void main() {
+      vec3 res = texture2D(tDiffuse, vUv).rgb * 0.227027;
+      res += texture2D(tDiffuse, vUv + uDirection * 1.384615).rgb * 0.316216;
+      res += texture2D(tDiffuse, vUv - uDirection * 1.384615).rgb * 0.316216;
+      res += texture2D(tDiffuse, vUv + uDirection * 3.230769).rgb * 0.070270;
+      res += texture2D(tDiffuse, vUv - uDirection * 3.230769).rgb * 0.070270;
+      gl_FragColor = vec4(res, 1.0);
+    }
+  `
+});
+
+const compositeMat = new THREE.ShaderMaterial({
+  depthTest: false,
+  depthWrite: false,
+  uniforms: {
+    tScene: { value: sceneRT.texture },
+    tBloom1: { value: bloom1A.texture },
+    tBloom2: { value: bloom2A.texture },
+    uTime: { value: 0 }
+  },
+  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tScene;
+    uniform sampler2D tBloom1;
+    uniform sampler2D tBloom2;
+    uniform float uTime;
+    varying vec2 vUv;
+
+    vec3 aces(vec3 x) {
+      float a = 2.51;
+      float b = 0.03;
+      float c = 2.43;
+      float d = 0.59;
+      float e = 0.14;
+      return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    }
+
+    void main() {
+      // Subtle edge chromatic aberration
+      vec2 toCenter = vUv - 0.5;
+      float r2 = dot(toCenter, toCenter);
+      vec2 ca = toCenter * r2 * 0.009;
+
+      float r = texture2D(tScene, vUv + ca).r;
+      float g = texture2D(tScene, vUv).g;
+      float b = texture2D(tScene, vUv - ca).b;
+      vec3 hdr = vec3(r, g, b);
+
+      vec3 b1 = texture2D(tBloom1, vUv).rgb;
+      vec3 b2 = texture2D(tBloom2, vUv).rgb;
+      hdr += b1 * 0.42 + b2 * 0.56;
+
+      // Exposure & ACES Filmic tone mapping
+      vec3 col = aces(hdr * 1.05);
+
+      // Subtle cinematic vignette
+      col *= 1.0 - smoothstep(0.28, 0.95, r2) * 0.42;
+
+      // Very fine film grain
+      float grain = fract(sin(dot(vUv * 800.0 + uTime * 17.0, vec2(12.9898, 78.233))) * 43758.5453);
+      col += (grain - 0.5) * 0.018;
+
+      // Linear to sRGB
+      col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+});
+
+const postQuad = new THREE.Mesh(quadGeo, brightMat);
+postScene.add(postQuad);
+
+function runBlurPass(srcTex, tempRT, dstRT) {
+  postQuad.material = blurMat;
+  blurMat.uniforms.tDiffuse.value = srcTex;
+  blurMat.uniforms.uDirection.value.set(1.0 / tempRT.width, 0.0);
+  renderer.setRenderTarget(tempRT);
+  renderer.render(postScene, postCam);
+
+  blurMat.uniforms.tDiffuse.value = tempRT.texture;
+  blurMat.uniforms.uDirection.value.set(0.0, 1.0 / dstRT.height);
+  renderer.setRenderTarget(dstRT);
+  renderer.render(postScene, postCam);
+}
+
+// ---------------------------------------------------------------------------
+// 11. CINEMATIC CAMERA FLIGHT & SUBTLE MOUSE LOOK PARALLAX
+// ---------------------------------------------------------------------------
+let mouseX = 0, mouseY = 0;
+let smoothMX = 0, smoothMY = 0;
+let lastPointerMove = -10;
+
+window.addEventListener('pointermove', (e) => {
+  mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+  mouseY = (e.clientY / window.innerHeight) * 2 - 1;
+  lastPointerMove = performance.now() * 0.001;
+});
+
+window.addEventListener('resize', () => {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  reflCamera.aspect = w / h;
+  reflCamera.updateProjectionMatrix();
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setSize(w, h);
+
+  const dpr = renderer.getPixelRatio();
+  rtW = Math.floor(w * dpr);
+  rtH = Math.floor(h * dpr);
+
+  sceneRT.setSize(rtW, rtH);
+  reflRT.setSize(Math.max(1, Math.floor(rtW * 0.5)), Math.max(1, Math.floor(rtH * 0.5)));
+  brightRT.setSize(Math.max(1, Math.floor(rtW * 0.5)), Math.max(1, Math.floor(rtH * 0.5)));
+  bloom1A.setSize(Math.max(1, Math.floor(rtW * 0.25)), Math.max(1, Math.floor(rtH * 0.25)));
+  bloom1B.setSize(Math.max(1, Math.floor(rtW * 0.25)), Math.max(1, Math.floor(rtH * 0.25)));
+  bloom2A.setSize(Math.max(1, Math.floor(rtW * 0.125)), Math.max(1, Math.floor(rtH * 0.125)));
+  bloom2B.setSize(Math.max(1, Math.floor(rtW * 0.125)), Math.max(1, Math.floor(rtH * 0.125)));
+});
+
+// ---------------------------------------------------------------------------
+// 12. MAIN ANIMATION LOOP
+// ---------------------------------------------------------------------------
+const clock = new THREE.Clock();
+let trailAccum = 0;
+const camTarget = new THREE.Vector3();
+const camForward = new THREE.Vector3();
+const camRight = new THREE.Vector3();
+const camUp = new THREE.Vector3();
+const reflTarget = new THREE.Vector3();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  // Smooth mouse parallax that gently recenters if idle
+  if (performance.now() * 0.001 - lastPointerMove > 4.0) {
+    mouseX *= 0.96;
+    mouseY *= 0.96;
+  }
+  smoothMX += (mouseX - smoothMX) * 0.04;
+  smoothMY += (mouseY - smoothMY) * 0.04;
+
+  // 1) Camera flies smoothly in a circle between inner and outer skyscrapers
+  const camAngle = t * 0.095;
+  const camR = 60.0 + Math.cos(camAngle * 2.0) * 1.9;
+  const camY = 12.8 + Math.sin(camAngle * 3.0) * 3.2;
+
+  camera.position.set(Math.cos(camAngle) * camR, camY, Math.sin(camAngle) * camR);
+
+  const lookAheadA = camAngle + 0.28 - smoothMX * 0.12;
+  const lookR = 60.0 + Math.cos(lookAheadA * 2.0) * 1.6;
+  const lookY = 13.5 + Math.sin(lookAheadA * 3.0) * 2.4 - smoothMY * 4.5;
+  camTarget.set(Math.cos(lookAheadA) * lookR, lookY, Math.sin(lookAheadA) * lookR);
+
+  // Subtle banking roll into the circular curve
+  camForward.subVectors(camTarget, camera.position).normalize();
+  camRight.crossVectors(camForward, upVec).normalize();
+  const bank = 0.045 + Math.sin(camAngle * 2.0) * 0.02;
+  camUp.copy(upVec).addScaledVector(camRight, bank).normalize();
+
+  camera.up.copy(camUp);
+  camera.lookAt(camTarget);
+  camera.updateMatrixWorld();
+
+  // Keep sky dome centered on camera
+  skyMesh.position.copy(camera.position);
+
+  // Move street dynamic point lights ahead along the boulevard
+  const laA = camAngle + 0.16;
+  const laB = camAngle + 0.36;
+  streetLightA.position.set(Math.cos(laA) * 56, 7.5, Math.sin(laA) * 56);
+  streetLightB.position.set(Math.cos(laB) * 64, 9.0, Math.sin(laB) * 64);
+
+  // 2) Update flying cars & light trails
+  stepCars(dt, false);
+  trailAccum += dt;
+  if (trailAccum >= 0.032) {
+    trailAccum = 0;
+    stepCars(0, true);
+    updateTrailGeometry();
+  }
+
+  // 3) Animate searchlights & blinking roof beacons
+  for (let i = 0; i < searchlights.length; i++) {
+    const sl = searchlights[i];
+    sl.mesh.rotation.x = Math.sin(t * 0.45 + sl.phase) * 0.32;
+    sl.mesh.rotation.z = Math.cos(t * 0.37 + sl.phase) * 0.32;
+  }
+  for (let i = 0; i < beacons.length; i++) {
+    const pulse = Math.pow(0.5 + 0.5 * Math.sin(t * 3.2 + beacons[i].phase), 6.0);
+    tmpCol.setRGB(4.2 * pulse + 0.2, 0.08, 0.08);
+    beaconIM.setColorAt(i, tmpCol);
+  }
+  if (beaconIM.instanceColor) beaconIM.instanceColor.needsUpdate = true;
+
+  // Update shader uniforms
+  skyMat.uniforms.uTime.value = t;
+  groundMat.uniforms.uTime.value = t;
+  rainMat.uniforms.uTime.value = t;
+  rainMat.uniforms.uCamPos.value.copy(camera.position);
+  compositeMat.uniforms.uTime.value = t;
+  for (let i = 0; i < signMats.length; i++) {
+    signMats[i].uniforms.uTime.value = t;
+  }
+
+  // 4) Render planar reflection into reflRT (reflecting across y = 0)
+  reflCamera.position.set(camera.position.x, -camera.position.y, camera.position.z);
+  reflTarget.set(camTarget.x, -camTarget.y, camTarget.z);
+  reflCamera.up.set(camera.up.x, -camera.up.y, camera.up.z);
+  reflCamera.lookAt(reflTarget);
+  reflCamera.updateMatrixWorld();
+
+  reflTextureMatrix.copy(biasMatrix);
+  reflTextureMatrix.multiply(reflCamera.projectionMatrix);
+  reflTextureMatrix.multiply(reflCamera.matrixWorldInverse);
+
+  groundMesh.visible = false;
+  rainLines.visible = false;
+  renderer.setRenderTarget(reflRT);
+  renderer.clear();
+  renderer.render(scene, reflCamera);
+  groundMesh.visible = true;
+  rainLines.visible = true;
+
+  // 5) Render main HDR scene into sceneRT
+  renderer.setRenderTarget(sceneRT);
+  renderer.clear();
+  renderer.render(scene, camera);
+
+  // 6) Multi-scale Bloom pass (bright extract -> 1/4 blur -> 1/8 wide blur)
+  postQuad.material = brightMat;
+  brightMat.uniforms.tDiffuse.value = sceneRT.texture;
+  renderer.setRenderTarget(brightRT);
+  renderer.render(postScene, postCam);
+
+  runBlurPass(brightRT.texture, bloom1B, bloom1A);
+  runBlurPass(bloom1A.texture, bloom2B, bloom2A);
+
+  // 7) Final ACES Filmic Composite to screen
+  postQuad.material = compositeMat;
+  renderer.setRenderTarget(null);
+  renderer.render(postScene, postCam);
+}
+
+animate();
+</script>
+</body>
+</html>

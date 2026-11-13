@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Native Сямыч — Intro</title>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: #030308;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #stage {
+    position: relative;
+    width: min(100vw, 56.25vh);
+    height: min(100vh, 177.7778vw);
+    background: #04040a;
+    box-shadow: 0 0 80px rgba(0, 240, 255, 0.12), 0 0 140px rgba(188, 19, 254, 0.12);
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c" width="1080" height="1920"></canvas>
+</div>
+<script>
+(() => {
+  const W = 1080;
+  const H = 1920;
+  const CX = W / 2;
+  const CY = H / 2;
+  const DURATION = 5000;
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+
+  // Deterministic PRNG
+  function mulberry32(a) {
+    return function() {
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const rand = mulberry32(421337);
+
+  // Easing helpers
+  const clamp = (v, min = 0, max = 1) => v < min ? min : v > max ? max : v;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const smoothstep = (e0, e1, x) => {
+    const t = clamp((x - e0) / (e1 - e0));
+    return t * t * (3 - 2 * t);
+  };
+  const easeOutExpo = x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
+  const easeInExpo = x => x <= 0 ? 0 : Math.pow(2, 10 * x - 10);
+  const easeOutBack = x => {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+  };
+
+  // Offscreen glow sprite
+  function makeGlowSprite(r, g, b) {
+    const s = document.createElement('canvas');
+    s.width = 128;
+    s.height = 128;
+    const gctx = s.getContext('2d');
+    const grad = gctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, `rgba(255,255,255,1)`);
+    grad.addColorStop(0.18, `rgba(${r},${g},${b},0.9)`);
+    grad.addColorStop(0.45, `rgba(${r},${g},${b},0.3)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    gctx.fillStyle = grad;
+    gctx.fillRect(0, 0, 128, 128);
+    return s;
+  }
+
+  const glowCyan = makeGlowSprite(0, 240, 255);
+  const glowMagenta = makeGlowSprite(195, 30, 255);
+  const glowMint = makeGlowSprite(0, 255, 165);
+
+  // Offscreen typography caches for crisp rendering & RGB glitch splitting
+  const TITLE_W = 1040;
+  const TITLE_H = 540;
+
+  function buildTitleLayer(mode) {
+    const off = document.createElement('canvas');
+    off.width = TITLE_W;
+    off.height = TITLE_H;
+    const octx = off.getContext('2d');
+    const ox = TITLE_W / 2;
+    const oy = 230;
+
+    octx.textAlign = 'center';
+    octx.textBaseline = 'middle';
+
+    // Main title: СЯМЫЧ
+    const mainFont = '900 182px "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif';
+    octx.font = mainFont;
+
+    if (mode === 'main') {
+      // Subtle 3D extrusion
+      for (let d = 8; d >= 1; d--) {
+        octx.fillStyle = d > 4 ? 'rgba(130, 10, 200, 0.25)' : 'rgba(0, 160, 220, 0.35)';
+        octx.fillText('СЯМЫЧ', ox + d * 1.1, oy + d * 1.3);
+      }
+
+      // Metallic neon gradient fill
+      const grad = octx.createLinearGradient(0, oy - 95, 0, oy + 95);
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.42, '#e8fbff');
+      grad.addColorStop(0.55, '#8ef4ff');
+      grad.addColorStop(1, '#ffffff');
+      octx.fillStyle = grad;
+      octx.fillText('СЯМЫЧ', ox, oy);
+
+      // Crisp inner neon edge
+      octx.lineWidth = 3;
+      const strokeGrad = octx.createLinearGradient(ox - 380, oy, ox + 380, oy);
+      strokeGrad.addColorStop(0, '#00f5ff');
+      strokeGrad.addColorStop(0.5, '#ffffff');
+      strokeGrad.addColorStop(1, '#d42bff');
+      octx.strokeStyle = strokeGrad;
+      octx.strokeText('СЯМЫЧ', ox, oy);
+
+      // Tech brackets around СЯМЫЧ
+      octx.strokeStyle = 'rgba(0, 245, 255, 0.85)';
+      octx.lineWidth = 4;
+      const bx = 420;
+      const by = oy;
+      // Left bracket
+      octx.beginPath();
+      octx.moveTo(ox - bx + 26, by - 96);
+      octx.lineTo(ox - bx, by - 96);
+      octx.lineTo(ox - bx, by + 96);
+      octx.lineTo(ox - bx + 26, by + 96);
+      octx.stroke();
+      // Right bracket
+      octx.beginPath();
+      octx.moveTo(ox + bx - 26, by - 96);
+      octx.lineTo(ox + bx, by - 96);
+      octx.lineTo(ox + bx, by + 96);
+      octx.lineTo(ox + bx - 26, by + 96);
+      octx.stroke();
+
+      // Subtitle badge: AI Native
+      const subY = oy + 148;
+      const pillW = 470;
+      const pillH = 78;
+      octx.fillStyle = 'rgba(8, 12, 28, 0.86)';
+      octx.beginPath();
+      octx.moveTo(ox - pillW / 2 + 18, subY - pillH / 2);
+      octx.lineTo(ox + pillW / 2, subY - pillH / 2);
+      octx.lineTo(ox + pillW / 2, subY + pillH / 2 - 18);
+      octx.lineTo(ox + pillW / 2 - 18, subY + pillH / 2);
+      octx.lineTo(ox - pillW / 2, subY + pillH / 2);
+      octx.lineTo(ox - pillW / 2, subY - pillH / 2 + 18);
+      octx.closePath();
+      octx.fill();
+
+      const pillGrad = octx.createLinearGradient(ox - pillW / 2, subY, ox + pillW / 2, subY);
+      pillGrad.addColorStop(0, '#00f5ff');
+      pillGrad.addColorStop(0.5, '#8c52ff');
+      pillGrad.addColorStop(1, '#ff2ef5');
+      octx.strokeStyle = pillGrad;
+      octx.lineWidth = 3;
+      octx.stroke();
+
+      // Subtitle text: AI Native
+      octx.font = '800 50px "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif';
+      const subGrad = octx.createLinearGradient(ox - 180, subY, ox + 180, subY);
+      subGrad.addColorStop(0, '#00f5ff');
+      subGrad.addColorStop(0.45, '#ffffff');
+      subGrad.addColorStop(1, '#e879ff');
+      octx.fillStyle = subGrad;
+      octx.fillText('A I   N a t i v e', ox, subY + 2);
+
+    } else if (mode === 'cyan' || mode === 'magenta') {
+      octx.fillStyle = mode === 'cyan' ? 'rgba(0, 245, 255, 0.85)' : 'rgba(255, 0, 212, 0.85)';
+      octx.fillText('СЯМЫЧ', ox, oy);
+      octx.font = '800 50px "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif';
+      octx.fillText('A I   N a t i v e', ox, oy + 150);
+    } else if (mode === 'glow') {
+      octx.shadowColor = '#00f0ff';
+      octx.shadowBlur = 42;
+      octx.fillStyle = 'rgba(0, 240, 255, 0.45)';
+      octx.fillText('СЯМЫЧ', ox, oy);
+      octx.shadowColor = '#c81eff';
+      octx.shadowBlur = 55;
+      octx.fillStyle = 'rgba(200, 30, 255, 0.35)';
+      octx.fillText('СЯМЫЧ', ox, oy);
+    }
+    return off;
+  }
+
+  const titleMain = buildTitleLayer('main');
+  const titleCyan = buildTitleLayer('cyan');
+  const titleMagenta = buildTitleLayer('magenta');
+  const titleGlow = buildTitleLayer('glow');
+
+  // Sheen canvas for specular sweep across СЯМЫЧ
+  const sheenCanvas = document.createElement('canvas');
+  sheenCanvas.width = TITLE_W;
+  sheenCanvas.height = TITLE_H;
+  const sctx = sheenCanvas.getContext('2d');
+
+  // Neural Network Nodes (3D space)
+  const NODES = 46;
+  const nodes = Array.from({ length: NODES }, (_, i) => {
+    const angle = rand() * Math.PI * 2;
+    const radius = 140 + rand() * 580;
+    return {
+      bx: Math.cos(angle) * radius,
+      by: Math.sin(angle) * radius * 1.45,
+      bz: (rand() - 0.5) * 650,
+      phase: rand() * Math.PI * 2,
+      speed: 0.8 + rand() * 1.6,
+      size: 4 + rand() * 6,
+      colorType: i % 3
+    };
+  });
+
+  // Code Matrix / Vibe Coding snippets
+  const SNIPPETS = [
+    'const ai = await Neural.boot();',
+    'vibe.compile({ mode: "NATIVE" });',
+    'tensor.forward(0x7F9A);',
+    'async function syamych(stream) {',
+    'weights.sync(EPOCH_MAX);',
+    'return consciousness.map(x => x*2);',
+    '01101100 01101001 01110110',
+    'GPU::dispatch(1080, 1920, 64);',
+    'prompt.inject("PURE_ENERGY");',
+    'λ => synth.resonance(432Hz);',
+    'matrix.invert().normalize();',
+    'SYS.AUTH // AI_NATIVE_CORE'
+  ];
+
+  const codeDrops = Array.from({ length: 24 }, (_, i) => ({
+    x: 50 + rand() * (W - 100),
+    y: rand() * H,
+    speed: 220 + rand() * 440,
+    text: SNIPPETS[i % SNIPPETS.length],
+    alpha: 0.12 + rand() * 0.28,
+    size: 18 + Math.floor(rand() * 10),
+    color: i % 4 === 0 ? '#00ffaa' : i % 2 === 0 ? '#00f0ff' : '#c84bff'
+  }));
+
+  // High-speed Energy Particles
+  const PARTICLES = 90;
+  const particles = Array.from({ length: PARTICLES }, (_, i) => {
+    const ang = rand() * Math.PI * 2;
+    return {
+      ang,
+      dist: 40 + rand() * 900,
+      speed: 300 + rand() * 900,
+      size: 10 + rand() * 26,
+      z: rand(),
+      type: i % 3
+    };
+  });
+
+  // Precomputed HUD Spectrum Bars
+  const SPEC_BARS = 64;
+  const specSeeds = Array.from({ length: SPEC_BARS }, () => 0.4 + rand() * 1.2);
+
+  // Offscreen copy buffer for horizontal glitch slices
+  const glitchBuffer = document.createElement('canvas');
+  glitchBuffer.width = W;
+  glitchBuffer.height = H;
+  const gbCtx = glitchBuffer.getContext('2d');
+
+  // Draw Perspective Cyber Grid (top & bottom)
+  function drawCyberGrid(t, intensity, warp) {
+    ctx.save();
+    const horizonTop = CY - 260;
+    const horizonBot = CY + 260;
+    const cols = 14;
+    const speedZ = (t * 2.4) % 1;
+
+    ctx.lineWidth = 2;
+
+    // Bottom floor & Top ceiling
+    for (let dir = -1; dir <= 1; dir += 2) {
+      const hy = dir === 1 ? horizonBot : horizonTop;
+      const edgeY = dir === 1 ? H : 0;
+
+      // Vertical perspective lines
+      for (let i = -cols; i <= cols; i++) {
+        const ratio = i / cols;
+        const x1 = CX + ratio * 160;
+        const x2 = CX + ratio * (1400 + warp * 500);
+        const grad = ctx.createLinearGradient(x1, hy, x2, edgeY);
+        grad.addColorStop(0, 'rgba(0, 240, 255, 0)');
+        grad.addColorStop(0.35, `rgba(0, 240, 255, ${0.22 * intensity})`);
+        grad.addColorStop(1, `rgba(188, 19, 254, ${0.42 * intensity})`);
+        ctx.strokeStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(x1, hy);
+        ctx.lineTo(x2, edgeY);
+        ctx.stroke();
+      }
+
+      // Horizontal moving depth lines
+      const rows = 12;
+      for (let r = 0; r < rows; r++) {
+        const p = (r + speedZ) / rows;
+        const depth = Math.pow(p, 2.3);
+        const y = lerp(hy, edgeY, depth);
+        const a = clamp(depth * 0.65 * intensity, 0, 0.55);
+        ctx.strokeStyle = dir === 1
+          ? `rgba(0, 240, 255, ${a})`
+          : `rgba(195, 30, 255, ${a})`;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  // Draw Neural Network Graph
+  function drawNeuralNet(t, converge, explode, alpha) {
+    if (alpha <= 0.01) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    const fov = 720;
+    const rotY = t * 0.55;
+    const rotX = Math.sin(t * 0.7) * 0.25;
+    const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+    const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+
+    const scaleFactor = lerp(1.25, 0.28, converge) + explode * 1.15;
+    const projected = [];
+
+    for (let i = 0; i < NODES; i++) {
+      const n = nodes[i];
+      const wobble = Math.sin(t * n.speed + n.phase) * 28;
+      const x0 = (n.bx + wobble) * scaleFactor;
+      const y0 = (n.by + Math.cos(t * n.speed + n.phase) * 24) * scaleFactor;
+      const z0 = n.bz * scaleFactor;
+
+      // Rotate Y then X
+      const x1 = x0 * cosY - z0 * sinY;
+      const z1 = x0 * sinY + z0 * cosY;
+      const y2 = y0 * cosX - z1 * sinX;
+      const z2 = y0 * sinX + z1 * cosX;
+
+      const persp = fov / (fov + z2 + 450);
+      projected.push({
+        x: CX + x1 * persp,
+        y: CY + y2 * persp,
+        persp,
+        type: n.colorType,
+        size: n.size
+      });
+    }
+
+    // Connections & Synaptic Pulses
+    const maxDist = 290;
+    for (let i = 0; i < NODES; i++) {
+      const a = projected[i];
+      for (let j = i + 1; j < NODES; j++) {
+        const b = projected[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < maxDist * maxDist) {
+          const d = Math.sqrt(d2);
+          const lineAlpha = (1 - d / maxDist) * 0.48 * alpha;
+          ctx.strokeStyle = (i + j) % 2 === 0
+            ? `rgba(0, 240, 255, ${lineAlpha})`
+            : `rgba(195, 35, 255, ${lineAlpha})`;
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+
+          // Travelling electric impulse on active edges
+          if ((i * 7 + j) % 5 === 0) {
+            const pPos = (t * 1.4 + (i * 0.17)) % 1;
+            const px = lerp(a.x, b.x, pPos);
+            const py = lerp(a.y, b.y, pPos);
+            ctx.fillStyle = `rgba(255, 255, 255, ${lineAlpha * 2.2})`;
+            ctx.beginPath();
+            ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+    }
+
+    // Draw Node Sprites
+    for (let i = 0; i < NODES; i++) {
+      const p = projected[i];
+      const spr = p.type === 0 ? glowCyan : p.type === 1 ? glowMagenta : glowMint;
+      const sz = p.size * p.persp * 6.5;
+      ctx.globalAlpha = clamp(alpha * p.persp * 1.2, 0, 1);
+      ctx.drawImage(spr, p.x - sz / 2, p.y - sz / 2, sz, sz);
+    }
+
+    ctx.restore();
+  }
+
+  // Draw Tech HUD Rings & Audio-style Spectrum around Core
+  function drawHudCore(t, radius, alpha, energy) {
+    if (alpha <= 0.01) return;
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Outer segmented ring
+    ctx.save();
+    ctx.rotate(t * 0.45);
+    ctx.strokeStyle = `rgba(0, 240, 255, ${0.42 * alpha})`;
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 6; i++) {
+      const a0 = (i / 6) * Math.PI * 2 + 0.08;
+      const a1 = ((i + 1) / 6) * Math.PI * 2 - 0.14;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, a0, a1);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Inner counter-rotating magenta arc
+    ctx.save();
+    ctx.rotate(-t * 0.85);
+    ctx.strokeStyle = `rgba(210, 40, 255, ${0.55 * alpha})`;
+    ctx.lineWidth = 5;
+    ctx.setLineDash([40, 24, 10, 24]);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.84, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Radial Spectrum Bars
+    ctx.save();
+    ctx.rotate(t * 0.2);
+    for (let i = 0; i < SPEC_BARS; i++) {
+      const ang = (i / SPEC_BARS) * Math.PI * 2;
+      const wave = Math.sin(t * 9 + i * 0.45) * 0.5 + 0.5;
+      const h = (12 + wave * 54 * specSeeds[i]) * (0.5 + energy);
+      const r0 = radius * 1.04;
+      const r1 = r0 + h;
+      ctx.strokeStyle = i % 2 === 0
+        ? `rgba(0, 245, 255, ${0.55 * alpha})`
+        : `rgba(188, 19, 254, ${0.55 * alpha})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * r0, Math.sin(ang) * r0);
+      ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  // Draw Background Streaming Code
+  function drawCodeStreams(t, alpha) {
+    if (alpha <= 0.01) return;
+    ctx.save();
+    ctx.font = '600 20px "Courier New", Consolas, monospace';
+    ctx.textBaseline = 'top';
+
+    for (let i = 0; i < codeDrops.length; i++) {
+      const c = codeDrops[i];
+      const y = (c.y + t * c.speed) % (H + 120) - 60;
+      // Avoid cluttering right behind the main title
+      const centerFade = smoothstep(140, 340, Math.abs(y - CY));
+      ctx.globalAlpha = c.alpha * alpha * (0.25 + 0.75 * centerFade);
+      ctx.fillStyle = c.color;
+      ctx.fillText(c.text, c.x, y);
+    }
+    ctx.restore();
+  }
+
+  // Draw Frame HUD Corner Telemetry
+  function drawTelemetry(t, alpha) {
+    if (alpha <= 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const pad = 54;
+
+    // Corner brackets
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.5)';
+    ctx.lineWidth = 3;
+    const len = 46;
+    // TL
+    ctx.beginPath();
+    ctx.moveTo(pad, pad + len); ctx.lineTo(pad, pad); ctx.lineTo(pad + len, pad);
+    // TR
+    ctx.moveTo(W - pad - len, pad); ctx.lineTo(W - pad, pad); ctx.lineTo(W - pad, pad + len);
+    // BL
+    ctx.moveTo(pad, H - pad - len); ctx.lineTo(pad, H - pad); ctx.lineTo(pad + len, H - pad);
+    // BR
+    ctx.moveTo(W - pad - len, H - pad); ctx.lineTo(W - pad, H - pad); ctx.lineTo(W - pad, H - pad - len);
+    ctx.stroke();
+
+    // Top telemetry text
+    ctx.font = '700 22px "Courier New", Consolas, monospace';
+    ctx.fillStyle = 'rgba(0, 245, 255, 0.85)';
+    ctx.textAlign = 'left';
+    const progressPct = Math.min(100, Math.floor((t / 5) * 100)).toString().padStart(2, '0');
+    ctx.fillText(`NEURAL.CORE // v4.2  [SYNC:${progressPct}%]`, pad + 18, pad + 34);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(216, 80, 255, 0.85)';
+    const recBlink = Math.sin(t * 12) > 0 ? '●' : '○';
+    ctx.fillText(`${recBlink} VIBE.CODE.STREAM`, W - pad - 18, pad + 34);
+
+    // Bottom terminal typing line
+    const cmdFull = '> run("ai_native_syamych.init()") // status: ONLINE_';
+    const chars = Math.floor(clamp((t - 0.3) / 1.7, 0, 1) * cmdFull.length);
+    const cmdText = cmdFull.slice(0, chars) + (Math.sin(t * 14) > 0 ? '█' : '');
+    ctx.textAlign = 'center';
+    ctx.font = '600 24px "Courier New", Consolas, monospace';
+    ctx.fillStyle = 'rgba(0, 255, 175, 0.78)';
+    ctx.fillText(cmdText, CX, H - pad - 24);
+
+    ctx.restore();
+  }
+
+  // Draw Main Hero Logo ("СЯМЫЧ" + "AI Native") with Sheen & RGB Glitch
+  function drawHeroTitle(t, appear, glitchAmount, scale, fadeOut) {
+    if (appear <= 0.01 || fadeOut <= 0.01) return;
+
+    const tx = CX - (TITLE_W * scale) / 2;
+    const ty = CY - (TITLE_H * scale) / 2 - 12;
+
+    ctx.save();
+    ctx.globalAlpha = appear * fadeOut;
+
+    // 1. Back neon bloom
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = appear * fadeOut * (0.75 + 0.25 * Math.sin(t * 7));
+    ctx.drawImage(titleGlow, tx, ty, TITLE_W * scale, TITLE_H * scale);
+    ctx.restore();
+
+    // 2. RGB Chromatic aberration during impact & micro-glitches
+    if (glitchAmount > 0.02) {
+      const shift = glitchAmount * 34;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = appear * fadeOut * clamp(glitchAmount * 1.1, 0, 0.85);
+      ctx.drawImage(titleCyan, tx - shift, ty + Math.sin(t * 60) * 4, TITLE_W * scale, TITLE_H * scale);
+      ctx.drawImage(titleMagenta, tx + shift, ty - Math.cos(t * 55) * 4, TITLE_W * scale, TITLE_H * scale);
+      ctx.restore();
+    }
+
+    // 3. Crisp Main Typography
+    ctx.drawImage(titleMain, tx, ty, TITLE_W * scale, TITLE_H * scale);
+
+    // 4. Specular Light Sweep across the letters (runs twice during hold)
+    const sweep1 = smoothstep(2.05, 2.75, t);
+    const sweep2 = smoothstep(3.30, 4.00, t);
+    const sweepPos = (sweep1 > 0 && sweep1 < 1) ? sweep1 : (sweep2 > 0 && sweep2 < 1) ? sweep2 : -1;
+
+    if (sweepPos > 0) {
+      sctx.clearRect(0, 0, TITLE_W, TITLE_H);
+      sctx.globalCompositeOperation = 'source-over';
+      sctx.drawImage(titleMain, 0, 0);
+      sctx.globalCompositeOperation = 'source-atop';
+
+      const sx = lerp(-240, TITLE_W + 240, sweepPos);
+      const sg = sctx.createLinearGradient(sx - 120, 0, sx + 120, 260);
+      sg.addColorStop(0, 'rgba(255,255,255,0)');
+      sg.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+      sg.addColorStop(1, 'rgba(255,255,255,0)');
+      sctx.fillStyle = sg;
+      sctx.fillRect(0, 0, TITLE_W, TITLE_H);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.75 * fadeOut;
+      ctx.drawImage(sheenCanvas, tx, ty, TITLE_W * scale, TITLE_H * scale);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  // Post-process horizontal slice glitch on full frame
+  function applyFrameGlitch(t, amount) {
+    if (amount <= 0.02) return;
+    gbCtx.drawImage(canvas, 0, 0);
+
+    const slices = Math.floor(4 + amount * 14);
+    for (let i = 0; i < slices; i++) {
+      const seed = Math.sin(t * 97.3 + i * 19.7);
+      const sy = Math.floor(((seed * 0.5 + 0.5) * H));
+      const sh = Math.floor(14 + Math.abs(Math.cos(t * 43 + i)) * 90);
+      const dx = Math.floor(Math.sin(t * 130 + i * 7.1) * amount * 95);
+      ctx.drawImage(glitchBuffer, 0, sy, W, sh, dx, sy, W, sh);
+
+      // Occasional cyan/magenta glitch bar
+      if (i % 3 === 0) {
+        ctx.fillStyle = i % 2 === 0
+          ? `rgba(0, 245, 255, ${0.18 * amount})`
+          : `rgba(255, 0, 220, ${0.18 * amount})`;
+        ctx.fillRect(0, sy, W, 6);
+      }
+    }
+  }
+
+  // Main Render Loop (5.000s seamless loop)
+  const startTime = performance.now();
+
+  function render(now) {
+    const elapsed = (now - startTime) % DURATION;
+    const t = elapsed / 1000; // 0.0 .. 5.0
+
+    // Timeline Envelopes
+    const introIn = smoothstep(0.0, 0.35, t);
+    const loopFadeOut = 1 - smoothstep(4.55, 4.98, t);
+    const masterAlpha = introIn * loopFadeOut;
+
+    // Phase 1 & 2: Convergence & Build-up (0.0 -> 1.85s)
+    const converge = smoothstep(0.45, 1.75, t);
+    const impactTime = 1.85;
+    const postImpact = clamp((t - impactTime) / 0.45, 0, 1);
+    const shockwave = (t >= impactTime && t < 2.6) ? (t - impactTime) / 0.75 : 0;
+
+    // Glitch Triggers: build-up jitter (1.55-1.85), impact (1.85-2.18), micro-glitches (2.88, 3.72), outro (4.55-4.95)
+    let glitch = 0;
+    if (t > 1.55 && t < 1.85) glitch = smoothstep(1.55, 1.85, t) * 0.55;
+    if (t >= 1.85 && t < 2.22) glitch = (1 - smoothstep(1.85, 2.22, t)) * 1.0;
+    if (t > 2.86 && t < 3.00) glitch = Math.sin(((t - 2.86) / 0.14) * Math.PI) * 0.55;
+    if (t > 3.72 && t < 3.85) glitch = Math.sin(((t - 3.72) / 0.13) * Math.PI) * 0.45;
+    if (t > 4.55) glitch = smoothstep(4.55, 4.90, t) * 0.9;
+
+    // Camera subtle impact shake
+    let shakeX = 0, shakeY = 0;
+    if (t >= 1.85 && t < 2.20) {
+      const decay = 1 - (t - 1.85) / 0.35;
+      shakeX = Math.sin(t * 140) * 18 * decay;
+      shakeY = Math.cos(t * 165) * 18 * decay;
+    }
+
+    // 1. Deep Obsidian Background + Central Ambient Glow
+    ctx.fillStyle = '#04040b';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    const bgGlow = ctx.createRadialGradient(CX, CY, 40, CX, CY, 960);
+    const pulse = 0.85 + 0.15 * Math.sin(t * 5);
+    bgGlow.addColorStop(0, `rgba(22, 18, 65, ${0.72 * masterAlpha * pulse})`);
+    bgGlow.addColorStop(0.45, `rgba(12, 8, 34, ${0.55 * masterAlpha})`);
+    bgGlow.addColorStop(1, 'rgba(4, 4, 11, 0)');
+    ctx.fillStyle = bgGlow;
+    ctx.fillRect(0, 0, W, H);
+
+    // 2. Perspective Cyber Grid
+    drawCyberGrid(t, masterAlpha, smoothstep(1.8, 2.5, t));
+
+    // 3. Code Streams
+    drawCodeStreams(t, masterAlpha * 0.9);
+
+    // 4. Neural Network
+    const netAlpha = masterAlpha * (t < impactTime ? 0.95 : lerp(0.95, 0.55, postImpact));
+    drawNeuralNet(t, converge * (1 - postImpact), easeOutExpo(postImpact), netAlpha);
+
+    // 5. High-Speed Radial Energy Particles
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < PARTICLES; i++) {
+      const p = particles[i];
+      const travel = t < impactTime
+        ? ((p.dist - t * p.speed * 0.55) % 900 + 900) % 900 // suck inward before impact
+        : (p.dist + (t - impactTime) * p.speed) % 1050;     // burst outward after impact
+      const px = CX + Math.cos(p.ang + t * 0.15) * travel;
+      const py = CY + Math.sin(p.ang + t * 0.15) * travel * 1.4;
+      const spr = p.type === 0 ? glowCyan : p.type === 1 ? glowMagenta : glowMint;
+      const a = masterAlpha * clamp(1 - travel / 1050, 0, 0.85) * 0.75;
+      ctx.globalAlpha = a;
+      ctx.drawImage(spr, px - p.size / 2, py - p.size / 2, p.size, p.size);
+    }
+    ctx.restore();
+
+    // 6. Central Core Singularity (Pre-impact 0.0 -> 1.85s)
+    if (t < 2.05) {
+      const coreScale = lerp(0.15, 1.0, easeOutExpo(clamp(t / 1.4))) * (1 - smoothstep(1.68, 1.90, t) * 0.65);
+      const coreAlpha = smoothstep(0.05, 0.4, t) * (1 - smoothstep(1.85, 2.05, t));
+      drawHudCore(t, 250 * coreScale, coreAlpha, converge);
+
+      // Glowing Energy Core Sphere
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const sphereSz = (180 + Math.sin(t * 24) * 24) * coreScale;
+      ctx.globalAlpha = coreAlpha;
+      ctx.drawImage(glowCyan, CX - sphereSz, CY - sphereSz, sphereSz * 2, sphereSz * 2);
+      ctx.drawImage(glowMagenta, CX - sphereSz * 0.7, CY - sphereSz * 0.7, sphereSz * 1.4, sphereSz * 1.4);
+      ctx.restore();
+    }
+
+    // 7. HUD Ring behind Brand (Post-impact 1.85 -> 5.0s)
+    if (t >= impactTime) {
+      const hudIn = easeOutExpo(clamp((t - impactTime) / 0.5));
+      drawHudCore(t, lerp(180, 440, hudIn), masterAlpha * 0.72, 0.5 + 0.3 * Math.sin(t * 4));
+    }
+
+    // 8. Shockwave Rings on Impact (1.85s)
+    if (shockwave > 0 && shockwave < 1) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const r = easeOutExpo(shockwave) * 1150;
+      const a = (1 - shockwave) * 0.9;
+      ctx.strokeStyle = `rgba(0, 245, 255, ${a})`;
+      ctx.lineWidth = 22 * (1 - shockwave);
+      ctx.beginPath();
+      ctx.arc(CX, CY, r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(215, 40, 255, ${a * 0.85})`;
+      ctx.lineWidth = 10 * (1 - shockwave);
+      ctx.beginPath();
+      ctx.arc(CX, CY, r * 0.82, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 9. Hero Typography: "СЯМЫЧ" + "AI Native"
+    if (t >= 1.82) {
+      const appear = clamp((t - 1.82) / 0.24, 0, 1);
+      const pop = easeOutBack(appear);
+      const breathe = 1 + Math.sin((t - 1.85) * 2.4) * 0.015;
+      const scale = lerp(1.38, 1.0, pop) * breathe;
+      drawHeroTitle(t, smoothstep(1.82, 1.96, t), glitch, scale, loopFadeOut);
+    }
+
+    // 10. Impact White Flash
+    if (t >= 1.84 && t < 2.08) {
+      const flashA = (1 - (t - 1.84) / 0.24);
+      ctx.fillStyle = `rgba(210, 250, 255, ${flashA * flashA * 0.58})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // 11. Telemetry HUD Frame
+    drawTelemetry(t, masterAlpha);
+
+    ctx.restore(); // end camera shake
+
+    // 12. Full-frame Horizontal Glitch Slices
+    applyFrameGlitch(t, glitch);
+
+    // 13. Subtle Scanlines & Cinematic Vignette
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
+    for (let y = 0; y < H; y += 6) {
+      ctx.fillRect(0, y, W, 2);
+    }
+
+    const vig = ctx.createRadialGradient(CX, CY, 420, CX, CY, 1180);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(2,2,8,0.78)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, W, H);
+
+    // Final seamless black fade at exact loop boundary
+    if (loopFadeOut < 1) {
+      ctx.fillStyle = `rgba(4, 4, 11, ${1 - loopFadeOut})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    requestAnimationFrame(render);
+  }
+
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
