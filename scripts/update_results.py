@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import re
+from datetime import datetime
 from html import escape
 from pathlib import Path
 
@@ -16,6 +17,7 @@ parser.add_argument("--exclude-model", action="append", default=[], help="Ост
 options = parser.parse_args()
 
 NAMES = {
+    "apple-intelligence": "Apple Intelligence",
     "gpt-6-astra": "GPT-6 Astra", "gpt-6.1-terra": "GPT-6.1 Terra",
     "gemini-4-hydrogen": "Gemini 4 Hydrogen",
     "gemini-4-carbon": "Gemini 4 Carbon", "kimi-k3.1-pro": "Kimi K3.1 Pro",
@@ -24,7 +26,7 @@ NAMES = {
     "qwen4-max-preview": "Qwen4-Max-Preview",
 }
 VENDORS = {"openai": ("OpenAI", "openai"), "google": ("Google", "googlegemini"),
-           "qwen": ("Alibaba", "qwen"),
+           "qwen": ("Alibaba", "qwen"), "apple": ("Apple", "apple"),
            "moonshotai": ("Moonshot AI", "moonshotai"), "anthropic": ("Anthropic", "anthropic")}
 TASK_NAMES = {"пальцы": "Пальцы", "портрет": "Портрет", "заставка": "Заставка", "3d-сцена": "3D-город"}
 HTML_TASKS = {"заставка": "intro.html", "3d-сцена": "city.html"}
@@ -111,7 +113,7 @@ def export_works(model, by_task, source_root):
     folder = Path("works") / model
     works = {}
     targets = dict(HTML_TASKS)
-    if model in {"qwen/qwen4-max-preview", "google/gemini-4-hydrogen"}:
+    if model in {"qwen/qwen4-max-preview", "google/gemini-4-hydrogen", "apple/apple-intelligence"}:
         targets["портрет"] = "portrait.svg"
     for task, target in targets.items():
         # Терминальный бенчмарк открывает файл из последней записи задачи.
@@ -196,6 +198,11 @@ def collect():
                            tokens_out=recorded_sum(all_runs, "tokens_out"), fingers=len(by_task["пальцы"]),
                            correct=sum(bool(r.get("correct")) for r in by_task["пальцы"]),
                            last=max(r["at"] for r in all_runs)[:10], duel=originals.get(m)))
+        if by_task["портрет"] and by_task["портрет"][-1].get("status") == "context_limit":
+            models[-1]["portrait_context_limit"] = True
+        if m == "apple/apple-intelligence":
+            models[-1]["video"] = {"url": "https://www.youtube.com/shorts/hPdhELMrhA4",
+                                   "publish_at": "2026-11-18T19:00:00+03:00"}
         if all_runs[0].get("cost_kind") == "hypothetical_release_price":
             models[-1]["assumed_usd_per_million"] = all_runs[0]["usd_per_million"]
     return sorted(models, key=lambda m: (not m["complete"], -(m["total"] or 0), m["id"]))
@@ -221,6 +228,8 @@ def render_model(model, rank):
         title = {"заставка": "Открыть заставку", "портрет": "Открыть портрет", "3d-сцена": "Открыть 3D-город"}[task]
         if "fixed_url" in work:
             title = "3D-город · оригинал с ошибкой"
+        elif task == "3d-сцена" and m["id"] == "apple/apple-intelligence":
+            title = "3D-город · пустой экран"
         links.append((title, work["url"]))
         if "fixed_url" in work:
             links.append(("3D-город · после правки", work["fixed_url"]))
@@ -228,11 +237,22 @@ def render_model(model, rank):
                          for label, url in links)
     if work_links:
         work_links = f'<div class="work-links">{work_links}</div>'
+    if video := m.get("video"):
+        release = datetime.fromisoformat(video["publish_at"])
+        label = release.strftime("%d.%m.%Y в %H:%M МСК")
+        work_links += (f'<div class="work-links" data-video-release="{release.isoformat()}">'
+                       f'<p>Выход шортса на YouTube · <time datetime="{release.isoformat()}">{label}</time></p>'
+                       f'<a hidden href="{escape(video["url"])}" target="_blank" rel="noopener noreferrer">'
+                       'Посмотреть шортс на YouTube ↗</a></div>')
     work_notes = "".join(f'<p>{escape(work["note"])} Оценка выставлена за оригинал.</p>'
                          for work in m["works"].values() if "note" in work)
     notes = [f'Пальцы угаданы в {m["correct"]} из {m["fingers"]} ответов. Эффективность относительно Opus — {display(m["efficiency"])} из 10.']
     if m["id"] == "google/gemini-4-hydrogen":
         notes.append("Цена и время указаны по зачётным ответам. Отдельная платная попытка нарисовать портрет оборвалась и в сумму не входит.")
+    if m["id"] == "apple/apple-intelligence":
+        notes.append("Локальный запуск на Mac. Цена вызова API — $0. Модель каждый раз отвечала «5», на фото шесть пальцев. Для заданий с изображением счётчик Apple не вернул число входных токенов.")
+    if m.get("portrait_context_limit"):
+        notes.append("При генерации портрета закончился контекст модели. Готового SVG нет.")
     if rates:
         notes.append(f'Прогон в веб-чате. Токены и время взяты из экспорта ответов. Для цены и итогового балла принят условный тариф ${rates["input"]} за миллион входных и ${rates["output"]} за миллион выходных токенов.')
     minutes, seconds = divmod(round(m["seconds"]), 60)

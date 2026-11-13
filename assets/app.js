@@ -1,4 +1,16 @@
 const table = document.querySelector("table");
+for (const release of document.querySelectorAll("[data-video-release]")) {
+  function updateRelease() {
+    const remaining = Date.parse(release.dataset.videoRelease) - Date.now();
+    if (remaining > 0) {
+      setTimeout(updateRelease, Math.min(remaining, 86400000));
+      return;
+    }
+    release.querySelector("p").hidden = true;
+    release.querySelector("a").hidden = false;
+  }
+  updateRelease();
+}
 const groups = Array.from(table.tBodies);
 const controls = document.querySelector(".sort");
 const status = document.querySelector("#sort-status");

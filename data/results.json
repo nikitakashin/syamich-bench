@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-12",
+  "updated": "2026-11-13",
   "reference": "anthropic/claude-opus-5.5",
   "models": [
     {
@@ -599,6 +599,75 @@
       "correct": 5,
       "last": "2026-10-24",
       "duel": null
+    },
+    {
+      "id": "apple/apple-intelligence",
+      "name": "Apple Intelligence",
+      "complete": true,
+      "tasks": {
+        "пальцы": 0.0,
+        "портрет": 1.0,
+        "заставка": 1.0,
+        "3d-сцена": 1.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": null,
+          "tokens_out": 123,
+          "tokens_total": null,
+          "cost": 0.0,
+          "estimated": false
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": null,
+          "tokens_out": null,
+          "tokens_total": null,
+          "cost": 0.0,
+          "estimated": false
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 269,
+          "tokens_out": 1257,
+          "tokens_total": 1526,
+          "cost": 0.0,
+          "estimated": false
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 275,
+          "tokens_out": 2435,
+          "tokens_total": 2710,
+          "cost": 0.0,
+          "estimated": false
+        }
+      },
+      "works": {
+        "заставка": {
+          "url": "works/apple/apple-intelligence/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/apple/apple-intelligence/city.html"
+        }
+      },
+      "quality": 0.75,
+      "efficiency": 9.22880873144174,
+      "total": 32.93642619432522,
+      "price": 0,
+      "calls": 8,
+      "seconds": 414.0,
+      "tokens_out": null,
+      "fingers": 5,
+      "correct": 0,
+      "last": "2026-11-13",
+      "duel": null,
+      "portrait_context_limit": true,
+      "video": {
+        "url": "https://www.youtube.com/shorts/hPdhELMrhA4",
+        "publish_at": "2026-11-18T19:00:00+03:00"
+      }
     }
   ]
 }
