@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#080b18">
+<title>После дождя — Midnight Loop</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080b18;color:#cfdfeb;font-family:Arial,sans-serif}canvas{display:block;width:100%;height:100%}
+#film{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 44%,transparent 43%,#04041158 100%);border-top:2.2vh solid #060810;border-bottom:2.2vh solid #060810}
+header,footer{position:absolute;left:5vw;text-shadow:0 2px 12px #03050c}header{top:6vh;display:flex;align-items:center;gap:12px;font:10px monospace;letter-spacing:.24em}i{width:23px;height:2px;background:#70ece3;box-shadow:0 0 9px #56beba}footer{bottom:7vh}small{font:9px monospace;letter-spacing:.31em;color:#acd1d6}h1{font-weight:300;font-size:clamp(22px,3vw,47px);letter-spacing:.13em;margin:9px 0 0}.index{position:absolute;right:5vw;bottom:7.4vh;text-align:right;font:10px/1.8 monospace;letter-spacing:.19em;color:#aac2ce}
+@media(max-width:600px){.index{display:none}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+</head>
+<body>
+<div id="film"><header><i></i> NOCTURNE SERIES &nbsp;/&nbsp; 001</header><footer><small>東京湾 &nbsp; · &nbsp; NIGHT TRANSIT</small><h1>После дождя</h1></footer><div class="index">湾岸環状線<br>ORBITAL DISTRICT &nbsp; // &nbsp; 07</div></div>
+<script type="module">
+import * as T from 'three';
+
+const renderer=new T.WebGLRenderer({antialias:false,alpha:false,powerPreference:'high-performance'});
+document.body.prepend(renderer.domElement);
+const scene=new T.Scene(), camera=new T.PerspectiveCamera(65,1,.15,530), mirror=camera.clone();
+const target=new T.WebGLRenderTarget(1,1,{minFilter:T.LinearFilter,magFilter:T.LinearFilter,generateMipmaps:false});
+let seed=70319;
+function rand(){seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}
+const TAU=Math.PI*2, dummy=new T.Object3D(), box=new T.BoxGeometry(), aim=new T.Vector3(), reflectVP=new T.Matrix4();
+const fog=`
+vec3 mist(vec3 c,float d,float h){
+ float f=1.-exp(-d*.0068);
+ return mix(c,mix(vec3(.115,.132,.212),vec3(.18,.157,.255),smoothstep(0.,85.,h)),f*.93);
+}`;
+const sky=new T.Mesh(new T.SphereGeometry(460,48,24),new T.ShaderMaterial({
+ side:T.BackSide,depthWrite:false,
+ vertexShader:`varying vec3 dir;void main(){dir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+ fragmentShader:`varying vec3 dir;
+ float hash(vec2 p){return fract(sin(dot(p,vec2(17.31,93.7)))*4375.545);}
+ void main(){vec3 d=normalize(dir);float h=max(d.y,0.);
+ vec3 c=mix(vec3(.18,.158,.25),vec3(.022,.031,.083),smoothstep(0.,.83,h));
+ vec3 moon=normalize(vec3(-.53,.65,-.8));float r=length(d-moon);
+ c+=vec3(.39,.52,.7)*exp(-r*12.)+vec3(.68,.78,.88)*(1.-smoothstep(.040,.044,r));
+ vec2 p=d.xz/(.25+h)*370.;float star=hash(floor(p));
+ c+=step(.992,star)*exp(-18.*dot(fract(p)-.5,fract(p)-.5))*.36*smoothstep(.12,.55,h);
+ gl_FragColor=vec4(c,1.);}`}));
+scene.add(sky);
+
+const blocks=[],ads=[];
+function block(x,y,z,w,h,d,a,k=rand()){blocks.push([x,y,z,w,h,d,a,k])}
+for(const [radius,count,minH,span] of [[14,8,46,49],[33,18,26,41],[65,32,28,58],[87,39,41,76],[119,46,55,97],[159,53,68,109]]){
+ for(let j=0;j<count;j++){
+  const a=TAU*(j+.15+rand()*.24)/count,r=radius+rand()*2,
+    x=r*Math.sin(a),z=r*Math.cos(a),w=TAU*radius/count*(.64+rand()*.23),
+    d=8+rand()*5,h=minH+span*rand(),k=rand();
+  block(x,h/2,z,w,h,d,a,k);
+  const cap=2+rand()*7;
+  block(x,h+cap/2,z,w*.76,cap,d*.76,a);
+  if(rand()<.42)block(x,h+cap+3,z,.18,6,.18,a,.99);
+  if(radius===33||radius===65){
+   let sign=radius===33?1:-1;
+   const sx=x+sign*Math.sin(a)*(d/2+.16),sz=z+sign*Math.cos(a)*(d/2+.16);
+   ads.push([sx,6+rand()*9,sz,a+(sign<0?Math.PI:0),w*1.02,2.7+rand()*1.3,Math.floor(rand()*8)]);
+   block(x,1.05,z,w*1.08,2.1,d+.9,a,k);
+  }
+ }
+}
+const bgeo=box.clone(),sizes=[],keys=[];
+const bmat=new T.ShaderMaterial({
+ vertexShader:`attribute vec3 dims;attribute float key;varying vec3 vP,vN,W;varying float K;
+ void main(){K=key;vP=position*dims;vN=normal;vec4 p=instanceMatrix*vec4(position,1.);W=p.xyz;gl_Position=projectionMatrix*viewMatrix*p;}`,
+ fragmentShader:`varying vec3 vP,vN,W;varying float K;
+ ${fog}
+ float hash(vec2 p){vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
+ void main(){
+ float u=abs(vN.x)>.5?vP.z:vP.x;vec2 g=vec2(u/(.72+K*.45),W.y/1.34);
+ vec2 id=floor(g),f=fract(g)-.5;
+ vec2 aa=clamp(fwidth(g),.015,.45);
+ vec2 win=1.-smoothstep(vec2(.305,.24)-aa*.5,vec2(.305,.24)+aa*.5,abs(f));
+ float n=hash(id+floor(K*310.)),row=hash(vec2(id.y,K));
+ float light=step(.42+.22*row,n)*(.29+.71*n);
+ vec3 cool=mix(vec3(.29,.62,.74),vec3(.68,.85,.89),K);
+ vec3 lamp=mix(cool,vec3(.97,.64,.41),step(.85,hash(vec2(id.x,K)))+.0);
+ vec3 c=vec3(.035,.052,.086)+vec3(.014,.015,.019)*cos(u*2.1)+.018*K;
+ c+=lamp*win.x*win.y*(.045+light)*step(abs(vN.y),.1);
+ float seam=1.-smoothstep(.02,.085,abs(fract(W.y/6.7)-.5));
+ c+=vec3(.03,.058,.072)*seam;
+ if(K>.79 && abs(vN.y)<.5){float strip=exp(-14.*abs(u));c+=strip*(K>.91?vec3(.96,.16,.39):vec3(.12,.77,.88));}
+ if(vN.y>.5)c=vec3(.086,.10,.145)+K*.021;
+ gl_FragColor=vec4(mist(c,length(cameraPosition-W),W.y),1.);}`
+});
+const buildings=new T.InstancedMesh(bgeo,bmat,blocks.length);
+function matrix(x,y,z,a,w,h,d){
+ dummy.position.set(x,y,z);dummy.rotation.set(0,a,0);dummy.scale.set(w,h,d);dummy.updateMatrix();return dummy.matrix;
+}
+blocks.forEach(([x,y,z,w,h,d,a,k],i)=>{buildings.setMatrixAt(i,matrix(x,y,z,a,w,h,d));sizes.push(w,h,d);keys.push(k)});
+bgeo.setAttribute('dims',new T.InstancedBufferAttribute(new Float32Array(sizes),3));
+bgeo.setAttribute('key',new T.InstancedBufferAttribute(new Float32Array(keys),1));scene.add(buildings);
+
+// Все вывески рисуются на одном локальном атласе.
+const atlas=document.createElement('canvas');atlas.width=768;atlas.height=1024;
+const ctx=atlas.getContext('2d'),names=['深夜電波','K I R I','光速急行','HOTEL  月','NEON 海','夜行鉄道','A O I','電子市場'],
+colors=['#ff507b','#48edff','#fcb46e','#ff699c','#69eaff','#a7a0ff','#72ffd4','#ff8879'];
+names.forEach((name,i)=>{
+ const y=i*128;ctx.fillStyle='#101426';ctx.fillRect(0,y,768,128);ctx.save();
+ ctx.strokeStyle=ctx.shadowColor=ctx.fillStyle=colors[i];ctx.shadowBlur=10;ctx.lineWidth=3;
+ ctx.strokeRect(12,y+9,744,109);ctx.fillRect(32,y+24,8,78);
+ ctx.font='bold 65px sans-serif';ctx.fillText(name,62,y+85);
+ ctx.shadowBlur=2;ctx.font='14px monospace';ctx.fillText('BAY AREA',605,y+48);
+ ctx.fillText('SYS / 0'+i,605,y+78);ctx.restore();
+});
+const tex=new T.CanvasTexture(atlas);tex.anisotropy=Math.min(4,renderer.capabilities.getMaxAnisotropy());
+const ag=new T.PlaneGeometry(),am=new T.ShaderMaterial({
+ uniforms:{map:{value:tex}},
+ vertexShader:`attribute float tile;varying vec2 U;varying vec3 W;void main(){U=vec2(uv.x,(7.-tile+uv.y)/8.);vec4 p=instanceMatrix*vec4(position,1.);W=p.xyz;gl_Position=projectionMatrix*viewMatrix*p;}`,
+ fragmentShader:`uniform sampler2D map;varying vec2 U;varying vec3 W;${fog} void main(){gl_FragColor=vec4(mist(texture2D(map,U).rgb,length(cameraPosition-W),W.y),1.);}`});
+const signs=new T.InstancedMesh(ag,am,ads.length);
+ads.forEach(([x,y,z,a,w,h],i)=>signs.setMatrixAt(i,matrix(x,y,z,a,w,h,1)));
+ag.setAttribute('tile',new T.InstancedBufferAttribute(Float32Array.from(ads,s=>s[6]),1));scene.add(signs);
+
+// Воздушный транспорт: общий инстансный корпус и две ленты следа на машину.
+const cars=Array.from({length:34},(_,i)=>({a:rand()*TAU,r:41+rand()*16,y:12+rand()*20,s:(i%2?1:-1)*(.073+rand()*.11),l:2.5+rand()*1.3}));
+const body=new T.InstancedMesh(box,new T.MeshBasicMaterial({color:0x394456}),cars.length),
+ cabin=new T.InstancedMesh(box,new T.MeshBasicMaterial({color:0x7894ab}),cars.length),
+ lamps=new T.InstancedMesh(box,new T.MeshBasicMaterial({color:0xbdffff}),cars.length*2);
+scene.add(body,cabin,lamps);
+const verts=[],cols=[];
+cars.forEach(({a,r,y,s,l},i)=>{
+ const color=i%3===0?[.22,.78,1]:[1,.15,.43];
+ for(const side of [-1,1])for(let j=0;j<16;j++)for(const [k,e] of [[0,-1],[1,-1],[0,1],[1,-1],[1,1],[0,1]]){
+  let u=(j+k)/16;verts.push(a-Math.sign(s)*(l*.5+u*7)/r,r+side*.52,y+e*(.08+.12*u),s);
+  cols.push(...color,Math.pow(1-u,2)*.94);
+ }
+});
+const tg=new T.BufferGeometry();tg.setAttribute('orbit',new T.Float32BufferAttribute(verts,4));
+tg.setAttribute('position',new T.Float32BufferAttribute(new Float32Array(verts.length/4*3),3));
+tg.setAttribute('tint',new T.Float32BufferAttribute(cols,4));
+const tm=new T.ShaderMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,blending:T.AdditiveBlending,uniforms:{time:{value:0}},
+vertexShader:`attribute vec4 orbit,tint;uniform float time;varying vec4 C;void main(){float a=orbit.x+time*orbit.w;vec3 p=vec3(sin(a)*orbit.y,orbit.z,cos(a)*orbit.y);C=tint;C.a*=exp(-.006*distance(cameraPosition,p));gl_Position=projectionMatrix*viewMatrix*vec4(p,1.);}`,
+fragmentShader:`varying vec4 C;void main(){gl_FragColor=C;}`});
+const trails=new T.Mesh(tg,tm);trails.frustumCulled=false;scene.add(trails);
+for(const m of [body,cabin,lamps]){m.frustumCulled=false;m.instanceMatrix.setUsage(T.DynamicDrawUsage)}
+
+const ground=new T.Mesh(new T.PlaneGeometry(720,720),new T.ShaderMaterial({
+ uniforms:{reflection:{value:target.texture},vp:{value:reflectVP},time:{value:0}},
+ vertexShader:`uniform mat4 vp;varying vec4 R;varying vec3 W;void main(){vec4 p=modelMatrix*vec4(position,1.);W=p.xyz;R=vp*p;gl_Position=projectionMatrix*viewMatrix*p;}`,
+ fragmentShader:`uniform sampler2D reflection;uniform float time;varying vec4 R;varying vec3 W;
+ float hash(vec2 p){vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
+ float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+1.),f.x),f.y);}
+ void main(){vec2 p=W.xz;float d=distance(cameraPosition,W),r=length(p);
+ float wet=smoothstep(.19,.82,noise(p*.32)*.7+noise(p*1.7)*.3);
+ vec2 uv=R.xy/R.w*.5+.5;
+ float ripple=noise(p*vec2(3.,11.)+vec2(time*.21,0.))-.5;
+ uv+=vec2(noise(p*3.)-.5,ripple)*(.0015+.004*(1.-wet));
+ vec2 off=vec2(.0008,.0024)*(1.3-wet);
+ vec3 refl=texture2D(reflection,uv).rgb*.4+(texture2D(reflection,uv+off).rgb+texture2D(reflection,uv-off).rgb)*.3;
+ vec3 c=vec3(.035,.042,.061)+refl*(.28+.49*wet);
+ float line=abs(r-49.);float dash=1.-smoothstep(.26,.31,abs(fract(atan(p.y,p.x)*20.3718)-.5));
+ c+=vec3(.22,.21,.18)*(1.-smoothstep(.035,.11,line))*dash;
+ float edge=min(abs(r-41.1),abs(r-56.4));c+=vec3(.13,.23,.25)*(1.-smoothstep(.03,.11,edge));
+ c+=(hash(floor(p*53.))-.5)*.025*exp(-d*.045);
+ gl_FragColor=vec4(mix(c,vec3(.13,.14,.21),1.-exp(-d*.0038)),1.);
+ }`}));
+ground.rotation.x=-Math.PI/2;scene.add(ground);
+
+let scale=Math.min(devicePixelRatio,1.35),avg=16,budget=0;
+function resize(){
+ const w=innerWidth,h=innerHeight;renderer.setPixelRatio(scale);renderer.setSize(w,h);
+ target.setSize(Math.max(2,Math.floor(w*scale*.51)),Math.max(2,Math.floor(h*scale*.51)));
+ camera.aspect=w/h;camera.updateProjectionMatrix();mirror.aspect=w/h;mirror.updateProjectionMatrix();
+}
+addEventListener('resize',resize);resize();
+let t=0,last=performance.now();
+function frame(now){
+ requestAnimationFrame(frame);
+ const dt=Math.min((now-last)/1000,.05);last=now;t+=dt;
+ avg=avg*.96+dt*1000*.04;
+ if(++budget>160){budget=0;if(avg>20&&scale>.76){scale=Math.max(.75,scale*.88);resize()}}
+ const a=t*.045+.6,r=49+1.45*Math.sin(t*.123);
+ camera.position.set(Math.sin(a)*r,4.1+1.05*Math.sin(t*.106),Math.cos(a)*r);
+ aim.set(Math.sin(a+.64)*49,7.5+1.8*Math.sin(t*.088),Math.cos(a+.64)*49);
+ camera.lookAt(aim);camera.rotateZ(.012*Math.sin(t*.12));camera.updateMatrixWorld();
+ tm.uniforms.time.value=t;ground.material.uniforms.time.value=t;
+ cars.forEach((v,i)=>{
+  const a=v.a+t*v.s,s=Math.sign(v.s),x=v.r*Math.sin(a),z=v.r*Math.cos(a),heading=a+s*Math.PI/2;
+  body.setMatrixAt(i,matrix(x,v.y,z,heading,1.48,.4,v.l));
+  cabin.setMatrixAt(i,matrix(x,v.y+.30,z,heading,.99,.30,v.l*.51));
+  for(let j=0;j<2;j++){const k=(j-.5)*1.04;
+   lamps.setMatrixAt(i*2+j,matrix(x+Math.sin(heading)*v.l*.5+k*Math.cos(heading),v.y+.04,z+Math.cos(heading)*v.l*.5-k*Math.sin(heading),heading,.32,.13,.09))}
+ });
+ body.instanceMatrix.needsUpdate=cabin.instanceMatrix.needsUpdate=lamps.instanceMatrix.needsUpdate=true;
+ mirror.position.copy(camera.position);mirror.position.y*=-1;
+ mirror.up.set(0,1,0).applyQuaternion(camera.quaternion);mirror.up.y*=-1;
+ mirror.lookAt(aim.x,-aim.y,aim.z);mirror.updateMatrixWorld();
+ reflectVP.multiplyMatrices(mirror.projectionMatrix,mirror.matrixWorldInverse);
+ ground.visible=false;renderer.setRenderTarget(target);renderer.render(scene,mirror);
+ ground.visible=true;renderer.setRenderTarget(null);renderer.render(scene,camera);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

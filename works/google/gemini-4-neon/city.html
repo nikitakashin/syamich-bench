@@ -1,0 +1,1689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cyberpunk Night City — Three.js</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #03040a;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 52%, rgba(2, 3, 10, 0.72) 100%),
+        linear-gradient(to bottom, rgba(2, 3, 10, 0.42) 0%, rgba(0, 0, 0, 0) 14%, rgba(0, 0, 0, 0) 86%, rgba(2, 3, 10, 0.5) 100%);
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="vignette"></div>
+  <script type="module">
+    import * as THREE from 'three';
+
+    // =========================================================================
+    // Deterministic PRNG
+    // =========================================================================
+    function createRNG(seed) {
+      let a = seed >>> 0;
+      return function () {
+        a |= 0;
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    const rand = createRNG(209907);
+    const randRange = (min, max) => min + rand() * (max - min);
+    const randPick = (arr) => arr[Math.floor(rand() * arr.length)];
+
+    // =========================================================================
+    // Renderer, Scene & Camera
+    // =========================================================================
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.18;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050712);
+    scene.fog = new THREE.FogExp2(0x0a0c1d, 0.0112);
+
+    const camera = new THREE.PerspectiveCamera(
+      58,
+      window.innerWidth / window.innerHeight,
+      0.3,
+      340
+    );
+
+    const maxAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
+
+    // =========================================================================
+    // Procedural Sky Dome (mirrored subtly below horizon for puddle reflections)
+    // =========================================================================
+    const skyGeo = new THREE.SphereGeometry(260, 32, 24);
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      uniforms: {
+        uTime: { value: 0 }
+      },
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize(position);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vDir;
+        uniform float uTime;
+
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+        }
+
+        float noise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+            mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+            f.y
+          );
+        }
+
+        void main() {
+          vec3 d = normalize(vDir);
+          float h = abs(d.y);
+          float ang = atan(d.z, d.x);
+
+          vec3 zenith = vec3(0.012, 0.018, 0.048);
+          vec3 midSky = vec3(0.045, 0.052, 0.13);
+          vec3 horizonA = vec3(0.16, 0.055, 0.22);
+          vec3 horizonB = vec3(0.03, 0.16, 0.26);
+          float blend = 0.5 + 0.5 * sin(ang * 2.0 + 0.8);
+          vec3 horizon = mix(horizonA, horizonB, blend);
+
+          vec3 col = mix(horizon, midSky, smoothstep(0.0, 0.24, h));
+          col = mix(col, zenith, smoothstep(0.18, 0.72, h));
+
+          // Drifting urban smog / high clouds catching neon glow
+          vec2 cloudUV = vec2(ang * 2.4 + uTime * 0.008, h * 6.0);
+          float c = noise(cloudUV * 2.2) * 0.6 + noise(cloudUV * 4.8 - uTime * 0.015) * 0.4;
+          float cloudMask = smoothstep(0.45, 0.82, c) * smoothstep(0.04, 0.22, h) * (1.0 - smoothstep(0.28, 0.72, h));
+          col += mix(vec3(0.14, 0.03, 0.18), vec3(0.02, 0.14, 0.22), 0.5 + 0.5 * cos(ang * 3.0)) * cloudMask * 0.55;
+
+          // Subtle stars near upper zenith
+          if (d.y > 0.18) {
+            vec2 starGrid = floor(vec2(ang * 42.0, d.y * 95.0));
+            float s = hash(starGrid);
+            if (s > 0.992) {
+              float twinkle = 0.6 + 0.4 * sin(uTime * 2.5 + s * 100.0);
+              col += vec3(0.75, 0.88, 1.0) * twinkle * smoothstep(0.18, 0.5, d.y) * 0.55;
+            }
+          }
+
+          // Slightly darken reflected hemisphere under y = 0
+          if (d.y < 0.0) {
+            col *= 0.62;
+          }
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `
+    });
+    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    scene.add(skyMesh);
+
+    // =========================================================================
+    // Procedural Textures
+    // =========================================================================
+    function createGlowTexture(innerHex = '#ffffff', midHex = '#00f0ff') {
+      const size = 128;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+      g.addColorStop(0.0, innerHex);
+      g.addColorStop(0.22, midHex);
+      g.addColorStop(0.55, 'rgba(255,255,255,0.16)');
+      g.addColorStop(1.0, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, size, size);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    const softGlowTex = createGlowTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0.55)');
+
+    function createFacadeMaterial(palette) {
+      const size = 512;
+      const diffC = document.createElement('canvas');
+      const emC = document.createElement('canvas');
+      const roughC = document.createElement('canvas');
+      diffC.width = emC.width = roughC.width = size;
+      diffC.height = emC.height = roughC.height = size;
+
+      const dCtx = diffC.getContext('2d');
+      const eCtx = emC.getContext('2d');
+      const rCtx = roughC.getContext('2d');
+
+      // Base metallic dark wall
+      dCtx.fillStyle = palette.wall;
+      dCtx.fillRect(0, 0, size, size);
+      eCtx.fillStyle = '#000000';
+      eCtx.fillRect(0, 0, size, size);
+      rCtx.fillStyle = '#9a9a9a';
+      rCtx.fillRect(0, 0, size, size);
+
+      const cols = palette.cols;
+      const rows = palette.rows;
+      const cw = size / cols;
+      const rh = size / rows;
+
+      // Subtle architectural concrete/metal panels
+      for (let r = 0; r < rows; r++) {
+        if (r % 4 === 0) {
+          dCtx.fillStyle = palette.trim;
+          dCtx.fillRect(0, r * rh, size, 4);
+          rCtx.fillStyle = '#555555';
+          rCtx.fillRect(0, r * rh, size, 4);
+        }
+        // Occasional horizontal tech neon band
+        const isBand = r === Math.floor(rows * 0.5) && palette.hasBand;
+        if (isBand) {
+          eCtx.fillStyle = palette.bandColor;
+          eCtx.fillRect(0, r * rh + rh * 0.35, size, rh * 0.22);
+          dCtx.fillStyle = palette.bandColor;
+          dCtx.fillRect(0, r * rh + rh * 0.35, size, rh * 0.22);
+          continue;
+        }
+
+        const floorOccupancy = 0.22 + rand() * 0.55;
+        for (let c = 0; c < cols; c++) {
+          const padX = cw * 0.16;
+          const padY = rh * 0.2;
+          const wx = c * cw + padX;
+          const wy = r * rh + padY;
+          const ww = cw - padX * 2;
+          const wh = rh - padY * 2;
+
+          // Dark reflective window glass
+          dCtx.fillStyle = '#070a14';
+          dCtx.fillRect(wx, wy, ww, wh);
+          rCtx.fillStyle = '#222222'; // Glossy glass
+          rCtx.fillRect(wx, wy, ww, wh);
+
+          if (rand() < floorOccupancy) {
+            const winColor = randPick(palette.lights);
+            const brightness = 0.45 + rand() * 0.55;
+
+            // Lit window interior gradient
+            const grad = eCtx.createLinearGradient(wx, wy, wx, wy + wh);
+            grad.addColorStop(0, winColor);
+            grad.addColorStop(1, '#111622');
+
+            eCtx.save();
+            eCtx.globalAlpha = brightness;
+            eCtx.fillStyle = grad;
+            eCtx.fillRect(wx, wy, ww, wh);
+
+            // Interior blinds / silhouettes for realism
+            if (rand() < 0.45) {
+              eCtx.fillStyle = '#05070e';
+              eCtx.globalAlpha = 0.45;
+              eCtx.fillRect(wx, wy + wh * 0.55, ww * (0.3 + rand() * 0.5), wh * 0.45);
+            }
+            eCtx.restore();
+
+            dCtx.save();
+            dCtx.globalAlpha = brightness * 0.85;
+            dCtx.fillStyle = winColor;
+            dCtx.fillRect(wx, wy, ww, wh);
+            dCtx.restore();
+          }
+        }
+      }
+
+      // Vertical steel mullions
+      dCtx.fillStyle = 'rgba(0,0,0,0.48)';
+      for (let c = 0; c < cols; c++) {
+        dCtx.fillRect(c * cw, 0, 2, size);
+      }
+
+      const map = new THREE.CanvasTexture(diffC);
+      const emissiveMap = new THREE.CanvasTexture(emC);
+      const roughnessMap = new THREE.CanvasTexture(roughC);
+
+      [map, emissiveMap, roughnessMap].forEach((t) => {
+        t.wrapS = THREE.RepeatWrapping;
+        t.wrapT = THREE.RepeatWrapping;
+        t.anisotropy = maxAnisotropy;
+      });
+      map.colorSpace = THREE.SRGBColorSpace;
+      emissiveMap.colorSpace = THREE.SRGBColorSpace;
+
+      return new THREE.MeshStandardMaterial({
+        map,
+        emissive: new THREE.Color(0xffffff),
+        emissiveMap,
+        emissiveIntensity: 1.55,
+        roughnessMap,
+        roughness: 0.72,
+        metalness: 0.55
+      });
+    }
+
+    const facadeMaterials = [
+      createFacadeMaterial({
+        wall: '#0c101d',
+        trim: '#161f36',
+        cols: 12,
+        rows: 22,
+        hasBand: true,
+        bandColor: '#00d8ff',
+        lights: ['#00e5ff', '#7ceeff', '#cdeeff', '#3a86ff', '#ff2a85']
+      }),
+      createFacadeMaterial({
+        wall: '#120e1e',
+        trim: '#241838',
+        cols: 10,
+        rows: 20,
+        hasBand: true,
+        bandColor: '#ff007f',
+        lights: ['#ff2a85', '#ff77c8', '#a855f7', '#ffd166', '#00e5ff']
+      }),
+      createFacadeMaterial({
+        wall: '#111218',
+        trim: '#222430',
+        cols: 14,
+        rows: 24,
+        hasBand: false,
+        bandColor: '#ffaa00',
+        lights: ['#ffb703', '#ff8800', '#ffe599', '#56cfe1', '#e0fbfc']
+      }),
+      createFacadeMaterial({
+        wall: '#0a1319',
+        trim: '#142731',
+        cols: 8,
+        rows: 18,
+        hasBand: true,
+        bandColor: '#00ffaa',
+        lights: ['#00f5d4', '#00bbf9', '#9ef01a', '#e0fbfc', '#ff4d6d']
+      })
+    ];
+
+    // Procedural Neon Sign Textures (vertical banners & horizontal billboards)
+    function drawCyberGlyph(ctx, cx, cy, s) {
+      ctx.beginPath();
+      const pattern = Math.floor(rand() * 5);
+      if (pattern === 0) {
+        ctx.moveTo(cx - s * 0.42, cy - s * 0.35);
+        ctx.lineTo(cx + s * 0.42, cy - s * 0.35);
+        ctx.moveTo(cx, cy - s * 0.48);
+        ctx.lineTo(cx, cy + s * 0.45);
+        ctx.moveTo(cx - s * 0.35, cy + s * 0.05);
+        ctx.lineTo(cx + s * 0.35, cy + s * 0.05);
+        ctx.lineTo(cx + s * 0.2, cy + s * 0.42);
+      } else if (pattern === 1) {
+        ctx.strokeRect(cx - s * 0.35, cy - s * 0.35, s * 0.7, s * 0.45);
+        ctx.moveTo(cx - s * 0.42, cy + s * 0.35);
+        ctx.lineTo(cx + s * 0.42, cy + s * 0.35);
+        ctx.moveTo(cx, cy - s * 0.35);
+        ctx.lineTo(cx, cy + s * 0.35);
+      } else if (pattern === 2) {
+        ctx.moveTo(cx - s * 0.4, cy - s * 0.25);
+        ctx.lineTo(cx + s * 0.4, cy - s * 0.25);
+        ctx.lineTo(cx - s * 0.25, cy + s * 0.42);
+        ctx.moveTo(cx + s * 0.05, cy - s * 0.05);
+        ctx.lineTo(cx + s * 0.42, cy + s * 0.42);
+      } else if (pattern === 3) {
+        ctx.arc(cx, cy - s * 0.05, s * 0.32, 0, Math.PI * 2);
+        ctx.moveTo(cx - s * 0.45, cy - s * 0.05);
+        ctx.lineTo(cx + s * 0.45, cy - s * 0.05);
+      } else {
+        ctx.moveTo(cx - s * 0.35, cy - s * 0.4);
+        ctx.lineTo(cx - s * 0.35, cy + s * 0.4);
+        ctx.moveTo(cx + s * 0.35, cy - s * 0.4);
+        ctx.lineTo(cx + s * 0.35, cy + s * 0.4);
+        ctx.moveTo(cx - s * 0.35, cy - s * 0.1);
+        ctx.lineTo(cx + s * 0.35, cy - s * 0.1);
+        ctx.moveTo(cx - s * 0.35, cy + s * 0.22);
+        ctx.lineTo(cx + s * 0.35, cy + s * 0.22);
+      }
+      ctx.stroke();
+    }
+
+    function createNeonSignSpec(cfg) {
+      const w = cfg.vertical ? 256 : 512;
+      const h = cfg.vertical ? 512 : 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+
+      // Deep tinted glass backing
+      ctx.fillStyle = cfg.bg;
+      ctx.fillRect(0, 0, w, h);
+
+      // Subtle holographic scanlines
+      ctx.fillStyle = 'rgba(255,255,255,0.045)';
+      for (let y = 0; y < h; y += 6) {
+        ctx.fillRect(0, y, w, 2);
+      }
+
+      // Outer glowing frame
+      ctx.save();
+      ctx.strokeStyle = cfg.primary;
+      ctx.shadowColor = cfg.primary;
+      ctx.shadowBlur = 22;
+      ctx.lineWidth = 7;
+      ctx.strokeRect(14, 14, w - 28, h - 28);
+
+      ctx.strokeStyle = cfg.secondary;
+      ctx.shadowColor = cfg.secondary;
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(24, 24, w - 48, h - 48);
+      ctx.restore();
+
+      if (cfg.vertical) {
+        // Vertical glowing emblem + stacked cyber glyphs
+        ctx.save();
+        ctx.strokeStyle = cfg.primary;
+        ctx.shadowColor = cfg.primary;
+        ctx.shadowBlur = 18;
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (let i = 0; i < 4; i++) {
+          drawCyberGlyph(ctx, w / 2, 95 + i * 95, 68);
+        }
+        ctx.restore();
+
+        // Bottom label
+        ctx.save();
+        ctx.font = 'bold 34px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = cfg.secondary;
+        ctx.shadowBlur = 18;
+        ctx.fillText(cfg.label, w / 2, h - 52);
+        ctx.restore();
+      } else {
+        // Horizontal billboard: geometric icon + bold glowing text + tech bars
+        ctx.save();
+        ctx.strokeStyle = cfg.secondary;
+        ctx.shadowColor = cfg.secondary;
+        ctx.shadowBlur = 20;
+        ctx.lineWidth = 5;
+        drawCyberGlyph(ctx, 96, h / 2, 92);
+        ctx.restore();
+
+        ctx.save();
+        ctx.font = '900 72px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = cfg.primary;
+        ctx.shadowBlur = 26;
+        ctx.fillText(cfg.label, 166, h * 0.44);
+
+        ctx.font = 'bold 24px monospace';
+        ctx.fillStyle = cfg.secondary;
+        ctx.shadowColor = cfg.secondary;
+        ctx.shadowBlur = 14;
+        ctx.fillText(cfg.sub, 168, h * 0.72);
+        ctx.restore();
+
+        // Decorative equalizer / barcode strip
+        ctx.fillStyle = cfg.primary;
+        for (let x = 168; x < w - 46; x += 14) {
+          const bh = 5 + ((x * 13) % 12);
+          ctx.fillRect(x, h - 42 - bh, 8, bh);
+        }
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = maxAnisotropy;
+
+      const mat = new THREE.MeshBasicMaterial({
+        map: tex,
+        color: new THREE.Color(1.32, 1.32, 1.32),
+        side: THREE.DoubleSide
+      });
+
+      return {
+        mat,
+        glowColor: new THREE.Color(cfg.primary),
+        vertical: cfg.vertical
+      };
+    }
+
+    const neonSignPalette = [
+      createNeonSignSpec({ vertical: true,  bg: '#080e1f', primary: '#00f0ff', secondary: '#ff007f', label: 'NEON' }),
+      createNeonSignSpec({ vertical: true,  bg: '#1c0617', primary: '#ff007f', secondary: '#00f0ff', label: '2099' }),
+      createNeonSignSpec({ vertical: true,  bg: '#140826', primary: '#b517ff', secondary: '#00f5d4', label: 'SYNTH' }),
+      createNeonSignSpec({ vertical: true,  bg: '#1e0f04', primary: '#ff7b00', secondary: '#ffe600', label: 'APEX' }),
+      createNeonSignSpec({ vertical: true,  bg: '#041c18', primary: '#00ffaa', secondary: '#00d9ff', label: 'ZERO' }),
+      createNeonSignSpec({ vertical: false, bg: '#091024', primary: '#00e5ff', secondary: '#ff2a85', label: 'CYBER', sub: 'SECTOR // 09' }),
+      createNeonSignSpec({ vertical: false, bg: '#1e071a', primary: '#ff1e7a', secondary: '#ffd166', label: 'PULSE', sub: 'NEURAL LINK' }),
+      createNeonSignSpec({ vertical: false, bg: '#120826', primary: '#9d4edd', secondary: '#00f5d4', label: 'NEXUS', sub: 'CORP TOWER' })
+    ];
+
+    // Procedural Wet Asphalt Ground Textures (puddles, roughness, micro-bump)
+    function createWetAsphaltTextures() {
+      const size = 512;
+      const alphaC = document.createElement('canvas');
+      const roughC = document.createElement('canvas');
+      const bumpC = document.createElement('canvas');
+      alphaC.width = roughC.width = bumpC.width = size;
+      alphaC.height = roughC.height = bumpC.height = size;
+
+      const aCtx = alphaC.getContext('2d');
+      const rCtx = roughC.getContext('2d');
+      const bCtx = bumpC.getContext('2d');
+
+      // Generate smooth tileable value-noise field for organic wet puddles
+      const grid = 16;
+      const vals = [];
+      for (let i = 0; i < grid * grid; i++) vals.push(rand());
+
+      function sampleNoise(u, v, freq) {
+        const x = ((u * freq) % grid + grid) % grid;
+        const y = ((v * freq) % grid + grid) % grid;
+        const x0 = Math.floor(x), y0 = Math.floor(y);
+        const x1 = (x0 + 1) % grid, y1 = (y0 + 1) % grid;
+        const fx = x - x0, fy = y - y0;
+        const sx = fx * fx * (3 - 2 * fx);
+        const sy = fy * fy * (3 - 2 * fy);
+        const v00 = vals[y0 * grid + x0];
+        const v10 = vals[y0 * grid + x1];
+        const v01 = vals[y1 * grid + x0];
+        const v11 = vals[y1 * grid + x1];
+        return (v00 * (1 - sx) + v10 * sx) * (1 - sy) + (v01 * (1 - sx) + v11 * sx) * sy;
+      }
+
+      const aImg = aCtx.createImageData(size, size);
+      const rImg = rCtx.createImageData(size, size);
+      const bImg = bCtx.createImageData(size, size);
+
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const u = x / size;
+          const v = y / size;
+          const n =
+            sampleNoise(u, v, 4) * 0.55 +
+            sampleNoise(u + 0.31, v + 0.17, 8) * 0.30 +
+            sampleNoise(u + 0.73, v + 0.59, 16) * 0.15;
+
+          const grain = rand();
+          // Wetness mask: high n = glossy puddle (more transparent to reveal reflection)
+          const puddle = Math.max(0, Math.min(1, (n - 0.38) / 0.28));
+
+          // Alpha map: darker = more transparent (shows reflections), brighter = darker damp tarmac
+          const alphaVal = Math.floor((0.86 - puddle * 0.54 + (grain - 0.5) * 0.05) * 255);
+          // Roughness map: puddles are mirror-smooth, asphalt is moderately rough
+          const roughVal = Math.floor((0.52 - puddle * 0.46 + (grain - 0.5) * 0.08) * 255);
+          // Bump map: flat on puddles, grainy on damp asphalt
+          const bumpVal = Math.floor((128 + (grain - 0.5) * (1 - puddle * 0.85) * 140));
+
+          const idx = (y * size + x) * 4;
+          aImg.data[idx] = aImg.data[idx + 1] = aImg.data[idx + 2] = Math.max(0, Math.min(255, alphaVal));
+          aImg.data[idx + 3] = 255;
+
+          rImg.data[idx] = rImg.data[idx + 1] = rImg.data[idx + 2] = Math.max(0, Math.min(255, roughVal));
+          rImg.data[idx + 3] = 255;
+
+          bImg.data[idx] = bImg.data[idx + 1] = bImg.data[idx + 2] = Math.max(0, Math.min(255, bumpVal));
+          bImg.data[idx + 3] = 255;
+        }
+      }
+
+      aCtx.putImageData(aImg, 0, 0);
+      rCtx.putImageData(rImg, 0, 0);
+      bCtx.putImageData(bImg, 0, 0);
+
+      const alphaMap = new THREE.CanvasTexture(alphaC);
+      const roughnessMap = new THREE.CanvasTexture(roughC);
+      const bumpMap = new THREE.CanvasTexture(bumpC);
+
+      [alphaMap, roughnessMap, bumpMap].forEach((t) => {
+        t.wrapS = THREE.RepeatWrapping;
+        t.wrapT = THREE.RepeatWrapping;
+        t.repeat.set(22, 22);
+        t.anisotropy = maxAnisotropy;
+      });
+
+      return { alphaMap, roughnessMap, bumpMap };
+    }
+
+    // Procedural Circular Boulevard Lane Markings Texture
+    function createRoadMarkingsTexture() {
+      const w = 512;
+      const h = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+
+      // Glowing curb lines on inner & outer edge of circular avenue
+      const drawGlowLine = (x, width, color, blur) => {
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = blur;
+        ctx.fillRect(x - width / 2, 0, width, h);
+        ctx.restore();
+      };
+
+      drawGlowLine(22, 7, '#00e5ff', 14);
+      drawGlowLine(w - 22, 7, '#ff007f', 14);
+
+      // Double center divider (amber/magenta cyber highway)
+      ctx.fillStyle = 'rgba(255, 190, 60, 0.55)';
+      ctx.fillRect(w * 0.5 - 8, 0, 4, h);
+      ctx.fillRect(w * 0.5 + 4, 0, 4, h);
+
+      // Dashed lane dividers
+      ctx.fillStyle = 'rgba(180, 235, 255, 0.45)';
+      for (let y = 24; y < h; y += 128) {
+        ctx.fillRect(w * 0.27 - 3, y, 6, 62);
+        ctx.fillRect(w * 0.73 - 3, y, 6, 62);
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1, 26);
+      tex.anisotropy = maxAnisotropy;
+      return tex;
+    }
+
+    // =========================================================================
+    // Custom Geometry Batch Builder (proper world-scaled UVs & Y-rotation)
+    // =========================================================================
+    class GeometryBatch {
+      constructor() {
+        this.pos = [];
+        this.norm = [];
+        this.uv = [];
+        this.idx = [];
+        this.vCount = 0;
+      }
+
+      addBox(cx, cy, cz, w, h, d, rotY = 0, opts = {}) {
+        const {
+          includeSides = true,
+          includeTop = true,
+          includeBottom = false,
+          tileU = 10,
+          tileV = 14,
+          uOff = 0,
+          vOff = 0
+        } = opts;
+
+        const hw = w * 0.5;
+        const hh = h * 0.5;
+        const hd = d * 0.5;
+        const cos = Math.cos(rotY);
+        const sin = Math.sin(rotY);
+
+        const pushQuad = (pts, n, uScale, vScale) => {
+          const base = this.vCount;
+          const nx = n[0] * cos + n[2] * sin;
+          const ny = n[1];
+          const nz = -n[0] * sin + n[2] * cos;
+          const uvs = [
+            [uOff, vOff],
+            [uOff + uScale, vOff],
+            [uOff + uScale, vOff + vScale],
+            [uOff, vOff + vScale]
+          ];
+          for (let i = 0; i < 4; i++) {
+            const lx = pts[i][0];
+            const ly = pts[i][1];
+            const lz = pts[i][2];
+            this.pos.push(
+              cx + lx * cos + lz * sin,
+              cy + ly,
+              cz - lx * sin + lz * cos
+            );
+            this.norm.push(nx, ny, nz);
+            this.uv.push(uvs[i][0], uvs[i][1]);
+          }
+          this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+          this.vCount += 4;
+        };
+
+        if (includeSides) {
+          // +Z front
+          pushQuad(
+            [[-hw, -hh, hd], [hw, -hh, hd], [hw, hh, hd], [-hw, hh, hd]],
+            [0, 0, 1], w / tileU, h / tileV
+          );
+          // -Z back
+          pushQuad(
+            [[hw, -hh, -hd], [-hw, -hh, -hd], [-hw, hh, -hd], [hw, hh, -hd]],
+            [0, 0, -1], w / tileU, h / tileV
+          );
+          // +X right
+          pushQuad(
+            [[hw, -hh, hd], [hw, -hh, -hd], [hw, hh, -hd], [hw, hh, hd]],
+            [1, 0, 0], d / tileU, h / tileV
+          );
+          // -X left
+          pushQuad(
+            [[-hw, -hh, -hd], [-hw, -hh, hd], [-hw, hh, hd], [-hw, hh, -hd]],
+            [-1, 0, 0], d / tileU, h / tileV
+          );
+        }
+        if (includeTop) {
+          pushQuad(
+            [[-hw, hh, hd], [hw, hh, hd], [hw, hh, -hd], [-hw, hh, -hd]],
+            [0, 1, 0], w / tileU, d / tileU
+          );
+        }
+        if (includeBottom) {
+          pushQuad(
+            [[-hw, -hh, -hd], [hw, -hh, -hd], [hw, -hh, hd], [-hw, -hh, hd]],
+            [0, -1, 0], w / tileU, d / tileU
+          );
+        }
+      }
+
+      toGeometry() {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+        geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.norm, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+        geo.setIndex(this.idx);
+        geo.computeBoundingSphere();
+        return geo;
+      }
+    }
+
+    // =========================================================================
+    // Build City Groups (Main World + Mirrored Wet-Asphalt Reflection World)
+    // =========================================================================
+    const cityGroup = new THREE.Group();
+    scene.add(cityGroup);
+
+    const reflectionGroup = new THREE.Group();
+    reflectionGroup.scale.y = -1;
+    reflectionGroup.position.y = -0.02;
+    scene.add(reflectionGroup);
+
+    function addToCityAndReflection(mesh, mirror = true) {
+      cityGroup.add(mesh);
+      if (mirror) {
+        const clone = mesh.clone();
+        reflectionGroup.add(clone);
+        return clone;
+      }
+      return null;
+    }
+
+    // Building batches (4 window palettes + dark rooftop/structural + 3 neon trim colors)
+    const facadeBatches = facadeMaterials.map(() => new GeometryBatch());
+    const structureBatch = new GeometryBatch();
+    const trimCyanBatch = new GeometryBatch();
+    const trimPinkBatch = new GeometryBatch();
+    const trimAmberBatch = new GeometryBatch();
+
+    const rooftopBeacons = [];
+    const glowHalos = []; // { x, y, z, scale, color }
+
+    function addSkyscraper(x, z, w, d, h, rotY, paletteIdx, options = {}) {
+      const batch = facadeBatches[paletteIdx];
+      const uOff = rand();
+      const vOff = rand();
+
+      // Main tower body (sides only — rooftop goes in dark metallic structureBatch)
+      batch.addBox(x, h * 0.5, z, w, h, d, rotY, {
+        includeSides: true,
+        includeTop: false,
+        tileU: 9.5,
+        tileV: 13.5,
+        uOff,
+        vOff
+      });
+
+      // Dark metallic rooftop cap
+      structureBatch.addBox(x, h + 0.25, z, w + 0.25, 0.5, d + 0.25, rotY, {
+        includeSides: true,
+        includeTop: true
+      });
+
+      // Optional stepped upper tier
+      let topY = h + 0.5;
+      if (h > 36 && rand() < 0.65) {
+        const w2 = w * randRange(0.54, 0.74);
+        const d2 = d * randRange(0.54, 0.74);
+        const h2 = randRange(7, 16);
+        batch.addBox(x, topY + h2 * 0.5, z, w2, h2, d2, rotY, {
+          includeSides: true,
+          includeTop: false,
+          tileU: 9.5,
+          tileV: 13.5,
+          uOff: rand(),
+          vOff: rand()
+        });
+        structureBatch.addBox(x, topY + h2 + 0.25, z, w2 + 0.2, 0.5, d2 + 0.2, rotY);
+        topY += h2 + 0.5;
+      }
+
+      // Glowing neon roof trim strip on select towers
+      if (options.neonTrim !== false && rand() < 0.52) {
+        const trimBatch = randPick([trimCyanBatch, trimPinkBatch, trimAmberBatch]);
+        trimBatch.addBox(x, h + 0.52, z, w + 0.36, 0.32, d + 0.36, rotY, {
+          includeSides: true,
+          includeTop: false
+        });
+      }
+
+      // Rooftop mechanical units & tall antenna spire
+      if (rand() < 0.7) {
+        const mw = w * 0.3;
+        const md = d * 0.3;
+        const mh = randRange(1.6, 3.8);
+        structureBatch.addBox(x, topY + mh * 0.5, z, mw, mh, md, rotY);
+      }
+
+      if (h > 42 && rand() < 0.62) {
+        const antH = randRange(8, 18);
+        structureBatch.addBox(x, topY + antH * 0.5, z, 0.28, antH, 0.28, 0);
+        rooftopBeacons.push({
+          x,
+          y: topY + antH + 0.4,
+          z,
+          phase: rand() * Math.PI * 2
+        });
+      }
+
+      return topY;
+    }
+
+    // -------------------------------------------------------------------------
+    // Central Mega-Spire (Hero landmark at origin)
+    // -------------------------------------------------------------------------
+    {
+      const spireTiers = [
+        { w: 17, d: 17, h: 44, y0: 0 },
+        { w: 12.5, d: 12.5, h: 32, y0: 44 },
+        { w: 8.2, d: 8.2, h: 24, y0: 76 },
+        { w: 4.0, d: 4.0, h: 16, y0: 100 }
+      ];
+      spireTiers.forEach((t, i) => {
+        facadeBatches[0].addBox(0, t.y0 + t.h * 0.5, 0, t.w, t.h, t.d, Math.PI * 0.25, {
+          includeSides: true,
+          includeTop: false,
+          tileU: 8.5,
+          tileV: 12
+        });
+        structureBatch.addBox(0, t.y0 + t.h + 0.3, 0, t.w + 0.4, 0.6, t.d + 0.4, Math.PI * 0.25);
+        (i % 2 === 0 ? trimCyanBatch : trimPinkBatch).addBox(
+          0, t.y0 + t.h + 0.65, 0, t.w + 0.55, 0.42, t.d + 0.55, Math.PI * 0.25,
+          { includeSides: true, includeTop: false }
+        );
+      });
+      // Vertical glowing corner ribs on central spire
+      for (let k = 0; k < 4; k++) {
+        const a = (k * Math.PI) / 2 + Math.PI * 0.25;
+        const rx = Math.cos(a) * 12.2;
+        const rz = Math.sin(a) * 12.2;
+        trimCyanBatch.addBox(rx, 22, rz, 0.42, 44, 0.42, 0);
+      }
+      // Tall antenna needle
+      structureBatch.addBox(0, 128, 0, 0.55, 24, 0.55, 0);
+      rooftopBeacons.push({ x: 0, y: 140.5, z: 0, phase: 0 });
+    }
+
+    // -------------------------------------------------------------------------
+    // Circular Boulevard City Layout (Clear Camera Corridor: r = 32.5 .. 51.5)
+    // -------------------------------------------------------------------------
+    const signAnchors = [];
+
+    // Ring 1A: Inner Canyon Wall (r ~ 26..29, facing outward toward boulevard)
+    const innerCanyonCount = 22;
+    for (let i = 0; i < innerCanyonCount; i++) {
+      const ang = (i / innerCanyonCount) * Math.PI * 2 + randRange(-0.025, 0.025);
+      const w = randRange(5.8, 7.8);
+      const d = randRange(6.2, 8.2);
+      const r = 31.6 - d * 0.5 - randRange(0.2, 1.4);
+      const h = randRange(34, 72);
+      const x = Math.cos(ang) * r;
+      const z = Math.sin(ang) * r;
+      const rotY = -ang + Math.PI * 0.5;
+      addSkyscraper(x, z, w, d, h, rotY, Math.floor(rand() * facadeMaterials.length));
+
+      // Register canyon-facing facade anchor for neon signs
+      const faceR = r + d * 0.5 + 0.35;
+      signAnchors.push({
+        ang,
+        r: faceR,
+        maxH: Math.min(h - 6, 40),
+        facingOut: true
+      });
+    }
+
+    // Ring 1B: Inner Core Towers behind Canyon Wall (r ~ 14..21)
+    const innerCoreCount = 12;
+    for (let i = 0; i < innerCoreCount; i++) {
+      const ang = (i / innerCoreCount) * Math.PI * 2 + 0.18;
+      const r = randRange(15.5, 19.5);
+      const w = randRange(6.5, 9.2);
+      const d = randRange(6.5, 9.2);
+      const h = randRange(54, 92);
+      addSkyscraper(
+        Math.cos(ang) * r,
+        Math.sin(ang) * r,
+        w, d, h,
+        -ang,
+        Math.floor(rand() * facadeMaterials.length)
+      );
+    }
+
+    // Ring 2A: Outer Canyon Wall (r ~ 55..59, facing inward toward boulevard)
+    const outerCanyonCount = 34;
+    for (let i = 0; i < outerCanyonCount; i++) {
+      const ang = (i / outerCanyonCount) * Math.PI * 2 + randRange(-0.02, 0.02);
+      // Leave subtle cross-street gaps every ~6 buildings for deep city vistas
+      if (i % 6 === 0 && rand() < 0.6) continue;
+      const w = randRange(6.4, 9.2);
+      const d = randRange(6.6, 9.0);
+      const r = 52.4 + d * 0.5 + randRange(0.2, 1.8);
+      const h = randRange(30, 76);
+      const x = Math.cos(ang) * r;
+      const z = Math.sin(ang) * r;
+      const rotY = -ang + Math.PI * 0.5;
+      addSkyscraper(x, z, w, d, h, rotY, Math.floor(rand() * facadeMaterials.length));
+
+      const faceR = r - d * 0.5 - 0.35;
+      signAnchors.push({
+        ang,
+        r: faceR,
+        maxH: Math.min(h - 6, 42),
+        facingOut: false
+      });
+    }
+
+    // Ring 2B & 2C: Outer Metropolis Skyline (r ~ 68..126)
+    const outerRings = [
+      { count: 40, rMin: 68, rMax: 78, hMin: 36, hMax: 86 },
+      { count: 46, rMin: 86, rMax: 102, hMin: 28, hMax: 94 },
+      { count: 48, rMin: 108, rMax: 132, hMin: 24, hMax: 78 }
+    ];
+    outerRings.forEach((ring) => {
+      for (let i = 0; i < ring.count; i++) {
+        const ang = (i / ring.count) * Math.PI * 2 + randRange(-0.05, 0.05);
+        const r = randRange(ring.rMin, ring.rMax);
+        const w = randRange(7.5, 13.5);
+        const d = randRange(7.5, 13.5);
+        const h = randRange(ring.hMin, ring.hMax);
+        addSkyscraper(
+          Math.cos(ang) * r,
+          Math.sin(ang) * r,
+          w, d, h,
+          rand() * Math.PI,
+          Math.floor(rand() * facadeMaterials.length)
+        );
+      }
+    });
+
+    // -------------------------------------------------------------------------
+    // Elevated Glowing Skybridges Crossing the Boulevard (y = 26..36)
+    // -------------------------------------------------------------------------
+    for (let i = 0; i < 4; i++) {
+      const ang = (i * Math.PI) / 2 + 0.42;
+      const y = 26 + (i % 2) * 8;
+      const midR = 42;
+      const bx = Math.cos(ang) * midR;
+      const bz = Math.sin(ang) * midR;
+      const rotY = -ang;
+      // Bridge span (radial length = 25, width = 3.2, height = 2.6)
+      structureBatch.addBox(bx, y, bz, 25, 2.4, 3.2, rotY);
+      // Glowing underside & side strips
+      const trimB = i % 2 === 0 ? trimCyanBatch : trimPinkBatch;
+      trimB.addBox(bx, y - 1.25, bz, 24.4, 0.25, 2.2, rotY);
+      trimB.addBox(bx, y + 0.1, bz, 24.4, 0.45, 3.35, rotY);
+    }
+
+    // -------------------------------------------------------------------------
+    // Streetlights Lining Both Sides of the Circular Boulevard
+    // -------------------------------------------------------------------------
+    const lampAngles = 28;
+    const lampRadii = [34.1, 49.9];
+    for (let i = 0; i < lampAngles; i++) {
+      const ang = (i / lampAngles) * Math.PI * 2;
+      const cos = Math.cos(ang);
+      const sin = Math.sin(ang);
+      const isCyan = i % 2 === 0;
+      const lampColor = isCyan ? new THREE.Color(0x00eaff) : new THREE.Color(0xff2a85);
+
+      lampRadii.forEach((r, sideIdx) => {
+        const px = cos * r;
+        const pz = sin * r;
+        const inward = sideIdx === 0 ? 1 : -1;
+        // Pole
+        structureBatch.addBox(px, 3.4, pz, 0.22, 6.8, 0.22, -ang);
+        // Cantilever arm toward road
+        const armX = cos * (r + inward * 0.9);
+        const armZ = sin * (r + inward * 0.9);
+        structureBatch.addBox(armX, 6.75, armZ, 1.9, 0.16, 0.2, -ang);
+        // Glowing lamp head
+        const headX = cos * (r + inward * 1.65);
+        const headZ = sin * (r + inward * 1.65);
+        (isCyan ? trimCyanBatch : trimPinkBatch).addBox(headX, 6.58, headZ, 0.75, 0.18, 0.36, -ang);
+
+        glowHalos.push({
+          x: headX,
+          y: 6.45,
+          z: headZ,
+          scale: 4.8,
+          color: lampColor
+        });
+      });
+    }
+
+    // Finalize Batched City Meshes
+    facadeBatches.forEach((batch, i) => {
+      const mesh = new THREE.Mesh(batch.toGeometry(), facadeMaterials[i]);
+      addToCityAndReflection(mesh, true);
+    });
+
+    const structureMat = new THREE.MeshStandardMaterial({
+      color: 0x0b0e18,
+      roughness: 0.62,
+      metalness: 0.68
+    });
+    addToCityAndReflection(new THREE.Mesh(structureBatch.toGeometry(), structureMat), true);
+
+    const trimCyanMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 1.7, 2.0) });
+    const trimPinkMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.0, 0.15, 0.95) });
+    const trimAmberMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.0, 1.15, 0.15) });
+
+    addToCityAndReflection(new THREE.Mesh(trimCyanBatch.toGeometry(), trimCyanMat), true);
+    addToCityAndReflection(new THREE.Mesh(trimPinkBatch.toGeometry(), trimPinkMat), true);
+    addToCityAndReflection(new THREE.Mesh(trimAmberBatch.toGeometry(), trimAmberMat), true);
+
+    // =========================================================================
+    // Neon Signs Along the Boulevard + Flickering Hero Signs
+    // =========================================================================
+    const flickeringSigns = [];
+    const signGeoV = new THREE.PlaneGeometry(2.6, 6.8);
+    const signGeoH = new THREE.PlaneGeometry(7.0, 3.3);
+
+    signAnchors.forEach((anchor, idx) => {
+      const count = rand() < 0.55 ? 2 : 1;
+      for (let s = 0; s < count; s++) {
+        const spec = randPick(neonSignPalette);
+        const y = randRange(7.5, Math.max(12, anchor.maxH - 4));
+        const protrude = spec.vertical && rand() < 0.72;
+
+        const rOffset = protrude ? (anchor.facingOut ? 1.55 : -1.55) : (anchor.facingOut ? 0.35 : -0.35);
+        const angJitter = anchor.ang + (s === 0 ? -0.022 : 0.028);
+        const r = anchor.r + rOffset;
+        const sx = Math.cos(angJitter) * r;
+        const sz = Math.sin(angJitter) * r;
+
+        const geo = spec.vertical ? signGeoV : signGeoH;
+        const isFlicker = idx % 7 === 0 && s === 0;
+        const mat = isFlicker ? spec.mat.clone() : spec.mat;
+
+        const signMesh = new THREE.Mesh(geo, mat);
+        signMesh.position.set(sx, y, sz);
+
+        // Rotate either protruding perpendicular to wall or flush facing road
+        if (protrude) {
+          signMesh.rotation.y = -angJitter;
+        } else {
+          signMesh.rotation.y = -angJitter + Math.PI * 0.5;
+        }
+
+        const mirrorSign = addToCityAndReflection(signMesh, true);
+
+        if (isFlicker) {
+          flickeringSigns.push({
+            mat,
+            mirrorMat: mirrorSign.material,
+            phase: rand() * 50,
+            speed: randRange(7, 16)
+          });
+        }
+
+        // Soft volumetric glow halo around each neon billboard
+        glowHalos.push({
+          x: sx,
+          y,
+          z: sz,
+          scale: spec.vertical ? 10.5 : 12.5,
+          color: spec.glowColor
+        });
+      }
+    });
+
+    // =========================================================================
+    // Instanced Volumetric Glow Halos (Streetlamps + Neon Sign Bleed)
+    // =========================================================================
+    const haloGeo = new THREE.PlaneGeometry(1, 1);
+    const haloMat = new THREE.MeshBasicMaterial({
+      map: softGlowTex,
+      transparent: true,
+      opacity: 0.24,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    const haloInstanced = new THREE.InstancedMesh(haloGeo, haloMat, glowHalos.length);
+    const haloMirrorInstanced = new THREE.InstancedMesh(haloGeo, haloMat, glowHalos.length);
+    const dummy = new THREE.Object3D();
+
+    glowHalos.forEach((h, i) => {
+      dummy.position.set(h.x, h.y, h.z);
+      dummy.scale.set(h.scale, h.scale, 1);
+      dummy.updateMatrix();
+      haloInstanced.setMatrixAt(i, dummy.matrix);
+      haloInstanced.setColorAt(i, h.color);
+      haloMirrorInstanced.setMatrixAt(i, dummy.matrix);
+      haloMirrorInstanced.setColorAt(i, h.color);
+    });
+    haloInstanced.instanceMatrix.needsUpdate = true;
+    haloInstanced.instanceColor.needsUpdate = true;
+    haloMirrorInstanced.instanceMatrix.needsUpdate = true;
+    haloMirrorInstanced.instanceColor.needsUpdate = true;
+    cityGroup.add(haloInstanced);
+    reflectionGroup.add(haloMirrorInstanced);
+
+    // Blinking Rooftop Aviation Warning Beacons
+    const beaconSprites = rooftopBeacons.map((b) => {
+      const mat = new THREE.SpriteMaterial({
+        map: softGlowTex,
+        color: 0xff1e38,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const sp = new THREE.Sprite(mat);
+      sp.position.set(b.x, b.y, b.z);
+      sp.scale.set(3.2, 3.2, 1);
+      cityGroup.add(sp);
+      return { sp, mat, phase: b.phase };
+    });
+
+    // =========================================================================
+    // Central Spire Holographic Rings & Volumetric Searchlight Beams
+    // =========================================================================
+    const holoRingsGroup = new THREE.Group();
+    holoRingsGroup.position.set(0, 74, 0);
+    cityGroup.add(holoRingsGroup);
+
+    const holoRing1 = new THREE.Mesh(
+      new THREE.TorusGeometry(13.5, 0.14, 8, 72),
+      new THREE.MeshBasicMaterial({
+        color: 0x00f0ff,
+        transparent: true,
+        opacity: 0.72,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    holoRing1.rotation.x = Math.PI * 0.44;
+    holoRingsGroup.add(holoRing1);
+
+    const holoRing2 = new THREE.Mesh(
+      new THREE.TorusGeometry(16.8, 0.1, 8, 72),
+      new THREE.MeshBasicMaterial({
+        color: 0xff007f,
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    holoRing2.rotation.x = Math.PI * 0.54;
+    holoRing2.rotation.y = 0.4;
+    holoRingsGroup.add(holoRing2);
+
+    // Upward volumetric searchlights cutting through the mist
+    const searchlights = [];
+    const beamGeo = new THREE.ConeGeometry(8.5, 110, 20, 1, true);
+    beamGeo.translate(0, 55, 0);
+    // Flip cone so apex is at the building roof and widens into the sky
+    beamGeo.scale(1, -1, 1);
+    beamGeo.translate(0, 110, 0);
+
+    const beamConfigs = [
+      { x: 0, y: 78, z: 0, color: 0x00e5ff, tilt: 0.22, speed: 0.35, phase: 0 },
+      { x: 0, y: 78, z: 0, color: 0xff007f, tilt: 0.28, speed: -0.28, phase: 2.1 },
+      { x: 64, y: 46, z: 32, color: 0x6c2bff, tilt: 0.25, speed: 0.22, phase: 1.0 },
+      { x: -58, y: 50, z: -42, color: 0x00f5d4, tilt: 0.24, speed: -0.26, phase: 3.4 }
+    ];
+    beamConfigs.forEach((cfg) => {
+      const mat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        uniforms: {
+          uColor: { value: new THREE.Color(cfg.color) }
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          varying float vHeight;
+          void main() {
+            vUv = uv;
+            vHeight = position.y / 110.0;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 uColor;
+          varying float vHeight;
+          void main() {
+            float fade = pow(1.0 - clamp(vHeight, 0.0, 1.0), 1.8) * smoothstep(0.0, 0.08, vHeight);
+            gl_FragColor = vec4(uColor, fade * 0.13);
+          }
+        `
+      });
+      const beam = new THREE.Mesh(beamGeo, mat);
+      beam.position.set(cfg.x, cfg.y, cfg.z);
+      scene.add(beam);
+      searchlights.push({ mesh: beam, ...cfg });
+    });
+
+    // =========================================================================
+    // Wet Reflective Asphalt Ground + Circular Highway Markings
+    // =========================================================================
+    const asphaltTex = createWetAsphaltTextures();
+    const groundGeo = new THREE.PlaneGeometry(420, 420);
+    groundGeo.rotateX(-Math.PI * 0.5);
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0x080b14,
+      alphaMap: asphaltTex.alphaMap,
+      roughnessMap: asphaltTex.roughnessMap,
+      bumpMap: asphaltTex.bumpMap,
+      bumpScale: 0.06,
+      roughness: 1.0,
+      metalness: 0.35,
+      transparent: true
+    });
+    const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+    groundMesh.position.y = 0;
+    scene.add(groundMesh);
+
+    // Custom UV-mapped circular road overlay for crisp lane lines & glowing curbs
+    function createCircularRoadGeometry(innerR, outerR, segments) {
+      const pos = [];
+      const norm = [];
+      const uv = [];
+      const idx = [];
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const a = t * Math.PI * 2;
+        const cos = Math.cos(a);
+        const sin = Math.sin(a);
+        pos.push(innerR * cos, 0, innerR * sin);
+        pos.push(outerR * cos, 0, outerR * sin);
+        norm.push(0, 1, 0, 0, 1, 0);
+        uv.push(0, t, 1, t);
+        if (i < segments) {
+          const v0 = i * 2;
+          const v1 = v0 + 1;
+          const v2 = v0 + 2;
+          const v3 = v0 + 3;
+          idx.push(v0, v2, v1, v1, v2, v3);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(norm, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      return geo;
+    }
+
+    const roadMarkingsMesh = new THREE.Mesh(
+      createCircularRoadGeometry(33.2, 50.8, 128),
+      new THREE.MeshBasicMaterial({
+        map: createRoadMarkingsTexture(),
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false
+      })
+    );
+    roadMarkingsMesh.position.y = 0.03;
+    scene.add(roadMarkingsMesh);
+
+    // =========================================================================
+    // Flying Cars Circling Overhead with Glowing Curved Light Trails
+    // =========================================================================
+    const flyingCars = [];
+
+    function createCurvedTrailGeometry(radius, dir, trailAngle, lateralOffset, width) {
+      const segs = 22;
+      const pos = [];
+      const col = [];
+      const idx = [];
+      const hw = width * 0.5;
+      const r = radius + lateralOffset;
+
+      // Create crossed ribbon (horizontal + vertical) for full 3D visibility
+      for (let plane = 0; plane < 2; plane++) {
+        const base = pos.length / 3;
+        for (let i = 0; i <= segs; i++) {
+          const t = i / segs;
+          const a = t * trailAngle;
+          const cos = Math.cos(a);
+          const sin = Math.sin(a) * dir;
+          const cx = r * cos;
+          const cz = r * sin;
+
+          // Fade intensity smoothly from bright tail to 0
+          const fade = Math.pow(1 - t, 1.85);
+          const taper = 1 - t * 0.65;
+
+          if (plane === 0) {
+            // Horizontal ribbon
+            pos.push((r - hw * taper) * cos, 0, (r - hw * taper) * sin);
+            pos.push((r + hw * taper) * cos, 0, (r + hw * taper) * sin);
+          } else {
+            // Vertical ribbon
+            pos.push(cx, -hw * taper, cz);
+            pos.push(cx, hw * taper, cz);
+          }
+          col.push(fade, fade, fade, fade, fade, fade);
+
+          if (i < segs) {
+            const v0 = base + i * 2;
+            idx.push(v0, v0 + 1, v0 + 2, v0 + 1, v0 + 3, v0 + 2);
+          }
+        }
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      geo.setIndex(idx);
+      return geo;
+    }
+
+    const carBodyGeo = new THREE.BoxGeometry(0.95, 0.36, 2.35);
+    const carBodyMat = new THREE.MeshStandardMaterial({
+      color: 0x0f1526,
+      roughness: 0.25,
+      metalness: 0.85
+    });
+
+    const carLanes = [
+      // Mid-altitude canyon lanes directly overhead
+      { count: 10, rMin: 35.5, rMax: 40.5, yMin: 18, yMax: 30, dir: 1,  speedMin: 0.22, speedMax: 0.36, mirror: true },
+      { count: 10, rMin: 43.5, rMax: 48.5, yMin: 19, yMax: 32, dir: -1, speedMin: 0.22, speedMax: 0.38, mirror: true },
+      // High-altitude orbital skyways
+      { count: 9,  rMin: 24.0, rMax: 58.0, yMin: 38, yMax: 58, dir: 1,  speedMin: 0.16, speedMax: 0.28, mirror: false },
+      { count: 9,  rMin: 28.0, rMax: 68.0, yMin: 42, yMax: 66, dir: -1, speedMin: 0.15, speedMax: 0.26, mirror: false }
+    ];
+
+    const trailColors = [
+      new THREE.Color(2.2, 0.14, 0.42), // Crimson / Hot Pink
+      new THREE.Color(0.15, 1.9, 2.2),  // Electric Cyan
+      new THREE.Color(2.2, 0.85, 0.12), // Cyber Amber
+      new THREE.Color(1.4, 0.25, 2.2)   // Neon Violet
+    ];
+
+    carLanes.forEach((lane) => {
+      for (let i = 0; i < lane.count; i++) {
+        const radius = randRange(lane.rMin, lane.rMax);
+        const baseY = randRange(lane.yMin, lane.yMax);
+        const speed = randRange(lane.speedMin, lane.speedMax) * lane.dir;
+        const startAng = rand() * Math.PI * 2;
+        const trailLen = randRange(0.28, 0.56);
+        const tColor = lane.dir > 0 ? randPick([trailColors[0], trailColors[2]]) : randPick([trailColors[1], trailColors[3]]);
+
+        const pivot = new THREE.Group();
+        pivot.position.y = baseY;
+        pivot.rotation.y = startAng;
+
+        // Car hull
+        const hull = new THREE.Mesh(carBodyGeo, carBodyMat);
+        hull.position.set(radius, 0, 0);
+        pivot.add(hull);
+
+        // Twin glowing light trails behind the car
+        const trailMat = new THREE.MeshBasicMaterial({
+          color: tColor,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.82,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide
+        });
+
+        const leftTrail = new THREE.Mesh(
+          createCurvedTrailGeometry(radius, lane.dir, trailLen, -0.34, 0.22),
+          trailMat
+        );
+        const rightTrail = new THREE.Mesh(
+          createCurvedTrailGeometry(radius, lane.dir, trailLen, 0.34, 0.22),
+          trailMat
+        );
+        pivot.add(leftTrail, rightTrail);
+
+        // Headlight & taillight glow sprites
+        const headMat = new THREE.SpriteMaterial({
+          map: softGlowTex,
+          color: 0xdff8ff,
+          transparent: true,
+          opacity: 0.92,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        });
+        const headSprite = new THREE.Sprite(headMat);
+        headSprite.position.set(radius, 0, -lane.dir * 1.25);
+        headSprite.scale.set(2.2, 2.2, 1);
+        pivot.add(headSprite);
+
+        const tailMat = new THREE.SpriteMaterial({
+          map: softGlowTex,
+          color: tColor,
+          transparent: true,
+          opacity: 0.95,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        });
+        const tailSprite = new THREE.Sprite(tailMat);
+        tailSprite.position.set(radius, 0, lane.dir * 1.25);
+        tailSprite.scale.set(2.8, 2.8, 1);
+        pivot.add(tailSprite);
+
+        cityGroup.add(pivot);
+
+        let mirrorPivot = null;
+        if (lane.mirror) {
+          mirrorPivot = pivot.clone();
+          reflectionGroup.add(mirrorPivot);
+        }
+
+        flyingCars.push({
+          pivot,
+          mirrorPivot,
+          baseY,
+          speed,
+          bobAmp: randRange(0.25, 0.85),
+          bobFreq: randRange(0.6, 1.4),
+          phase: rand() * Math.PI * 2
+        });
+      }
+    });
+
+    // =========================================================================
+    // Atmospheric Night Drizzle (Subtle Neon Rain Streaks)
+    // =========================================================================
+    const rainCount = 1300;
+    const rainBox = { x: 68, y: 42, z: 68 };
+    const rainPositions = new Float32Array(rainCount * 6);
+    const rainSeeds = new Float32Array(rainCount * 4); // ox, oy, oz, speed
+
+    for (let i = 0; i < rainCount; i++) {
+      rainSeeds[i * 4 + 0] = (rand() - 0.5) * rainBox.x;
+      rainSeeds[i * 4 + 1] = rand() * rainBox.y;
+      rainSeeds[i * 4 + 2] = (rand() - 0.5) * rainBox.z;
+      rainSeeds[i * 4 + 3] = randRange(24, 38);
+    }
+
+    const rainGeo = new THREE.BufferGeometry();
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+    const rainMat = new THREE.LineBasicMaterial({
+      color: 0x7dd8ff,
+      transparent: true,
+      opacity: 0.16,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const rainLines = new THREE.LineSegments(rainGeo, rainMat);
+    rainLines.frustumCulled = false;
+    scene.add(rainLines);
+
+    // =========================================================================
+    // Cinematic Lighting Setup
+    // =========================================================================
+    const hemiLight = new THREE.HemisphereLight(0x283a78, 0x260c2e, 0.75);
+    scene.add(hemiLight);
+
+    const moonLight = new THREE.DirectionalLight(0x5a7fd6, 0.55);
+    moonLight.position.set(60, 110, 45);
+    scene.add(moonLight);
+
+    // 5 dynamic colored street lights leapfrogging cleanly along the boulevard
+    // so wet asphalt puddles always shimmer with grounded neon reflections
+    const streetLightPalette = [0x00eaff, 0xff007f, 0x8f2bff, 0x00ffaa, 0xff7700];
+    const streetLights = streetLightPalette.map((col, idx) => {
+      const pl = new THREE.PointLight(col, 48, 42, 1.5);
+      pl.position.set(42, 7.5, 0);
+      scene.add(pl);
+      return { light: pl, idx };
+    });
+
+    // Subtle pointer parallax (non-intrusive; autopilot remains cinematic)
+    let pointerX = 0;
+    let pointerY = 0;
+    let smoothPX = 0;
+    let smoothPY = 0;
+    window.addEventListener('pointermove', (e) => {
+      pointerX = (e.clientX / window.innerWidth - 0.5) * 2;
+      pointerY = (e.clientY / window.innerHeight - 0.5) * 2;
+    }, { passive: true });
+
+    // =========================================================================
+    // Resize Handling
+    // =========================================================================
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    });
+
+    // =========================================================================
+    // Main Render Loop (60 FPS)
+    // =========================================================================
+    const clock = new THREE.Clock();
+    let elapsed = 0;
+    const camPos = new THREE.Vector3();
+    const lookTarget = new THREE.Vector3();
+    const haloQuat = new THREE.Quaternion();
+    const haloPos = new THREE.Vector3();
+    const haloScale = new THREE.Vector3();
+    const haloMat4 = new THREE.Matrix4();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(clock.getDelta(), 0.05);
+      elapsed += dt;
+      skyMat.uniforms.uTime.value = elapsed;
+
+      // -----------------------------------------------------------------------
+      // Smooth Cinematic Camera Flight Around the Circular Skyscraper Canyon
+      // -----------------------------------------------------------------------
+      const orbitSpeed = 0.062;
+      const camAngle = elapsed * orbitSpeed;
+      const camRadius = 42.0 + Math.sin(elapsed * 0.21) * 1.85;
+      const camHeight = 10.6 + Math.sin(elapsed * 0.27) * 2.9 + Math.cos(elapsed * 0.13) * 0.9;
+
+      camPos.set(
+        Math.cos(camAngle) * camRadius,
+        camHeight,
+        Math.sin(camAngle) * camRadius
+      );
+      camera.position.copy(camPos);
+
+      // Smooth pointer parallax damping
+      smoothPX += (pointerX - smoothPX) * Math.min(1, dt * 3.0);
+      smoothPY += (pointerY - smoothPY) * Math.min(1, dt * 3.0);
+
+      // Look gracefully ahead along the curved avenue with subtle upward gaze
+      const lookAheadAngle = camAngle + 0.28;
+      const lookRadius = 41.2 - Math.sin(elapsed * 0.19) * 2.8 + smoothPX * 4.5;
+      const lookY = 12.2 + Math.sin(elapsed * 0.23 + 0.8) * 4.2 - smoothPY * 3.5;
+
+      lookTarget.set(
+        Math.cos(lookAheadAngle) * lookRadius,
+        lookY,
+        Math.sin(lookAheadAngle) * lookRadius
+      );
+      camera.lookAt(lookTarget);
+
+      // Gentle cinematic drone bank into the circular turn
+      camera.rotateZ(-0.045 + Math.sin(elapsed * 0.21) * 0.018 - smoothPX * 0.025);
+
+      // -----------------------------------------------------------------------
+      // Billboard Instanced Glow Halos Toward Camera
+      // -----------------------------------------------------------------------
+      haloQuat.copy(camera.quaternion);
+      for (let i = 0; i < glowHalos.length; i++) {
+        const h = glowHalos[i];
+        haloPos.set(h.x, h.y, h.z);
+        haloScale.set(h.scale, h.scale, 1);
+        haloMat4.compose(haloPos, haloQuat, haloScale);
+        haloInstanced.setMatrixAt(i, haloMat4);
+        haloMirrorInstanced.setMatrixAt(i, haloMat4);
+      }
+      haloInstanced.instanceMatrix.needsUpdate = true;
+      haloMirrorInstanced.instanceMatrix.needsUpdate = true;
+
+      // -----------------------------------------------------------------------
+      // Grounded Leapfrogging Street PointLights (Wet Asphalt Specular Shimmer)
+      // -----------------------------------------------------------------------
+      const stationStep = (Math.PI * 2) / 14;
+      const baseStation = Math.floor(camAngle / stationStep);
+      for (let i = 0; i < streetLights.length; i++) {
+        const sIdx = baseStation - 1 + i;
+        const sAng = sIdx * stationStep;
+        const side = (sIdx % 2 === 0) ? 35.8 : 48.2;
+        const lx = Math.cos(sAng) * side;
+        const lz = Math.sin(sAng) * side;
+        const sl = streetLights[i].light;
+        sl.position.set(lx, 6.2, lz);
+        sl.color.setHex(streetLightPalette[((sIdx % streetLightPalette.length) + streetLightPalette.length) % streetLightPalette.length]);
+
+        // Smooth fade at ends of window so no light ever pops
+        const dist = sl.position.distanceTo(camPos);
+        const fade = Math.max(0, 1 - Math.max(0, dist - 22) / 30);
+        sl.intensity = 58 * fade;
+      }
+
+      // -----------------------------------------------------------------------
+      // Animate Flying Cars & Light Trails
+      // -----------------------------------------------------------------------
+      for (let i = 0; i < flyingCars.length; i++) {
+        const car = flyingCars[i];
+        car.pivot.rotation.y += car.speed * dt;
+        const y = car.baseY + Math.sin(elapsed * car.bobFreq + car.phase) * car.bobAmp;
+        car.pivot.position.y = y;
+        if (car.mirrorPivot) {
+          car.mirrorPivot.rotation.y = car.pivot.rotation.y;
+          car.mirrorPivot.position.y = y;
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // Animate Holographic Rings, Searchlights, Beacons & Flickering Neon
+      // -----------------------------------------------------------------------
+      holoRing1.rotation.z = elapsed * 0.35;
+      holoRing2.rotation.z = -elapsed * 0.24;
+      holoRingsGroup.position.y = 74 + Math.sin(elapsed * 0.8) * 0.8;
+
+      for (let i = 0; i < searchlights.length; i++) {
+        const s = searchlights[i];
+        const a = elapsed * s.speed + s.phase;
+        s.mesh.rotation.x = Math.sin(a) * s.tilt;
+        s.mesh.rotation.z = Math.cos(a * 0.85) * s.tilt;
+      }
+
+      for (let i = 0; i < beaconSprites.length; i++) {
+        const b = beaconSprites[i];
+        const pulse = 0.25 + 0.75 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * 2.6 + b.phase), 3);
+        b.mat.opacity = pulse;
+      }
+
+      for (let i = 0; i < flickeringSigns.length; i++) {
+        const f = flickeringSigns[i];
+        const n = Math.sin(elapsed * f.speed + f.phase) * Math.sin(elapsed * f.speed * 2.7 + f.phase);
+        const level = n > 0.76 ? 0.35 : 1.32;
+        f.mat.color.setRGB(level, level, level);
+        f.mirrorMat.color.setRGB(level, level, level);
+      }
+
+      // -----------------------------------------------------------------------
+      // Update Rain Streaks Centered Around Camera
+      // -----------------------------------------------------------------------
+      const rArr = rainGeo.attributes.position.array;
+      for (let i = 0; i < rainCount; i++) {
+        const idx4 = i * 4;
+        rainSeeds[idx4 + 1] -= rainSeeds[idx4 + 3] * dt;
+        if (rainSeeds[idx4 + 1] < 0) {
+          rainSeeds[idx4 + 1] += rainBox.y;
+        }
+        // Seamless world-space wrapping around camera
+        const rx = camPos.x + ((((rainSeeds[idx4 + 0] - camPos.x) % rainBox.x) + rainBox.x * 1.5) % rainBox.x) - rainBox.x * 0.5;
+        const ry = rainSeeds[idx4 + 1];
+        const rz = camPos.z + ((((rainSeeds[idx4 + 2] - camPos.z) % rainBox.z) + rainBox.z * 1.5) % rainBox.z) - rainBox.z * 0.5;
+
+        const pIdx = i * 6;
+        rArr[pIdx + 0] = rx;
+        rArr[pIdx + 1] = ry;
+        rArr[pIdx + 2] = rz;
+        rArr[pIdx + 3] = rx + 0.04;
+        rArr[pIdx + 4] = ry - 1.15;
+        rArr[pIdx + 5] = rz + 0.04;
+      }
+      rainGeo.attributes.position.needsUpdate = true;
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+  </script>
+</body>
+</html>

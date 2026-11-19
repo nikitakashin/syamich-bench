@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050810">
+<title>AI Native Сямыч — заставка</title>
+<style>
+  * { box-sizing: border-box }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #050810 }
+  svg { display: block; width: 100%; height: 100%; background: radial-gradient(ellipse, #101525, #050810 68%) }
+  text { font-family: Arial, Helvetica, sans-serif }
+  .mono { font-family: Consolas, "Courier New", monospace; font-size: 17px; letter-spacing: 3px; fill: #94aab8 }
+  .line { fill: none; stroke: #82a6b8; stroke-opacity: .4; stroke-width: 2 }
+</style>
+</head>
+<body>
+<svg id="stage" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Неоновая заставка канала AI Native Сямыч">
+<defs>
+  <radialGradient id="field">
+    <stop stop-color="#152338"/>
+    <stop offset=".55" stop-color="#0b101d"/>
+    <stop offset="1" stop-color="#050810"/>
+  </radialGradient>
+  <linearGradient id="wire" x1="0" y1=".3" x2="1" y2=".7" gradientUnits="objectBoundingBox">
+    <stop stop-color="#ad82ff"/><stop offset=".32" stop-color="#5350bb"/>
+    <stop offset=".52" stop-color="#c2fff5"/><stop offset=".68" stop-color="#39e4d1"/>
+    <stop offset="1" stop-color="#38709b"/>
+  </linearGradient>
+  <linearGradient id="metal" x2=".16" y2="1">
+    <stop stop-color="#fff"/><stop offset=".43" stop-color="#f3fffd"/>
+    <stop offset=".55" stop-color="#c6dddf"/><stop offset="1" stop-color="#94b1c7"/>
+  </linearGradient>
+  <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+    <path d="M60 0H0V60" fill="none" stroke="#9ad6e6" stroke-opacity=".065"/>
+    <circle r="1.5" fill="#81acc5" opacity=".3"/>
+  </pattern>
+  <pattern id="scan" width="8" height="8" patternUnits="userSpaceOnUse">
+    <path d="M0 1H8" stroke="#02060c" stroke-opacity=".14"/>
+  </pattern>
+  <filter id="bloom" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur stdDeviation="8"/>
+  </filter>
+  <text id="name" x="0" y="0" text-anchor="middle" font-size="172" font-weight="900" letter-spacing="-7" textLength="836" lengthAdjust="spacingAndGlyphs">СЯМЫЧ</text>
+  <clipPath id="slice"><rect id="cut" x="-480" y="-110" width="960" height="16"/></clipPath>
+</defs>
+<rect width="1080" height="1920" fill="url(#field)"/>
+<rect x="48" y="88" width="984" height="1744" fill="url(#grid)"/>
+<g id="dust" fill="#b3e1e3"></g>
+<g class="line">
+  <path d="M64 197V108H153 M927 108H1016V197 M64 1723V1812H153 M927 1812H1016V1723"/>
+  <path d="M88 300H992 M88 1592H992" opacity=".5"/>
+</g>
+<g transform="translate(88 190)">
+  <rect width="46" height="46" rx="9" fill="#93ffde"/>
+  <path d="M10 33L22 12H27L16 33ZM26 33l7-12 5 12Z" fill="#091419"/>
+  <text x="66" y="22" font-weight="bold" font-size="24" letter-spacing="2" fill="#e5f4ef">NATIVE LAB</text>
+  <text class="mono" x="67" y="46" style="font-size:13px">GENERATIVE SYSTEMS</text>
+</g>
+<text class="mono" x="992" y="221" text-anchor="end">ID : SYM—01</text>
+<g class="mono" style="font-size:14px">
+  <text x="88" y="342">FIG. 01</text>
+  <text x="992" y="342" text-anchor="end">LATENT SURFACE</text>
+</g>
+
+<!-- Пространственная сетка строится из сечений тороидального поля. -->
+<g id="sculpture">
+  <g id="orbit" fill="none" stroke="#7fc7cb">
+    <circle r="348" opacity=".16" stroke-dasharray="2 9"/>
+    <path d="M-348 0a348 348 0 0 1 63-200 M348 0a348 348 0 0 1-63 200" opacity=".55"/>
+    <circle cx="-348" r="5" fill="#aaffdf" stroke="none"/>
+  </g>
+  <g id="mesh" fill="none" stroke="url(#wire)" stroke-linejoin="round"></g>
+</g>
+
+<g id="boot" text-anchor="middle">
+  <text id="bootLabel" class="mono" y="1424">01 / SEED</text>
+  <path d="M402 1456H678" stroke="#30404d" stroke-width="3"/>
+  <path id="loading" d="M402 1456H678" stroke="#85ffdc" stroke-width="3" stroke-dasharray="276"/>
+</g>
+
+<g id="title">
+  <g fill="#78f9db" opacity=".21" filter="url(#bloom)"><use href="#name"/></g>
+  <use href="#name" fill="url(#metal)"/>
+  <g clip-path="url(#slice)"><use id="echo" href="#name" fill="#80ffe3"/></g>
+  <g transform="translate(0 95)">
+    <path d="M-250 -14H-171 M171 -14H250" stroke="#72b7b1" stroke-width="2"/>
+    <text text-anchor="middle" fill="#acffeb" font-size="42" font-weight="600" letter-spacing="5">AI Native</text>
+  </g>
+</g>
+
+<g transform="translate(88 1642)">
+  <circle cx="6" cy="-5" r="5" fill="#91ffdb"/>
+  <text x="26" class="mono" id="status">SYSTEM / INIT</text>
+  <text x="904" class="mono" text-anchor="end" id="clock">00:00.00</text>
+  <g id="meter" transform="translate(0 30)"></g>
+  <text class="mono" y="105" style="font-size:14px">CODE × INTELLIGENCE</text>
+  <text class="mono" x="904" y="105" text-anchor="end" style="font-size:14px">SERIES / 001</text>
+</g>
+<rect width="1080" height="1920" fill="url(#scan)" pointer-events="none"/>
+<rect id="flare" width="1080" height="1920" fill="#baffec" opacity="0"/>
+</svg>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const tau = 2 * Math.PI;
+  const clamp = x => Math.max(0, Math.min(1, x));
+  function ease(a,b,t) {
+    const x = clamp((t-a)/(b-a));
+    return x*x*(3-2*x);
+  }
+  function node(parent, tag, attrs) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k,v] of Object.entries(attrs)) el.setAttribute(k,v);
+    parent.appendChild(el);
+    return el;
+  }
+  let seed = 71;
+  const random = () => ((seed = Math.imul(seed,1664525)+1013904223 >>> 0) / 4294967296);
+  const specks = Array.from({length:68}, () => {
+    const x = 70+940*random(), y = 360+1200*random(), phase = random()*tau;
+    return {el:node($('dust'),'circle',{cx:x,cy:y,r:.7+1.6*random()}),y,phase};
+  });
+  const bars = Array.from({length:64}, (_,i) =>
+    node($('meter'),'rect',{x:i*14.17,y:0,width:10,height:i%8===0?17:9,rx:1}));
+  const loops = [];
+  function loop(n, uv, opacity, width) {
+    const pts = Array.from({length:n}, (_,i) => {
+      const [u,v] = uv(tau*i/n);
+      return [Math.cos(u), Math.sin(u), Math.cos(v), Math.sin(v), Math.cos(3*u), Math.sin(3*u)];
+    });
+    loops.push({pts,el:node($('mesh'),'path',{'stroke-opacity':opacity,'stroke-width':width})});
+  }
+  for(let j=0;j<48;j++) loop(32,v=>[tau*j/48,v],j%4===0?.9:.46,j%4===0?2.8:1.6);
+  for(let j=0;j<12;j++) loop(96,u=>[u,tau*j/12],j%3===0?.83:.35,1.7);
+
+  const epoch = performance.now();
+  function frame(now) {
+    const t = ((now-epoch)%5000)/1000, phase = tau*t/5;
+    const lock = ease(1.65,2.52,t)*(1-ease(4.42,5,t));
+    const power = ease(0,.65,t)*(1-ease(4.65,5,t));
+    const angle = phase+.45, ca=Math.cos(angle),sa=Math.sin(angle);
+    const tilt=.9+.24*Math.sin(phase), ct=Math.cos(tilt),st=Math.sin(tilt);
+    const cp=Math.cos(phase),sp=Math.sin(phase);
+    $('sculpture').setAttribute('transform',`translate(540 ${900-205*lock}) scale(${(.68+.32*power)*(1-.26*lock)})`);
+    $('sculpture').setAttribute('opacity',power);
+    $('orbit').setAttribute('transform',`rotate(${t*72})`);
+    for(const {pts,el} of loops) {
+      let d='';
+      for(let i=0;i<pts.length;i++) {
+        const [cu,su,cv,sv,c3,s3]=pts[i];
+        const wave=s3*cp+c3*sp;
+        const radius=203+24*wave+(88+14*wave)*cv;
+        const x=radius*cu,y=radius*su,z=86*sv+42*wave;
+        const a=x*ca-y*sa,b=x*sa+y*ca;
+        const depth=b*st+z*ct, k=940/(940-depth);
+        d+=(i?'L':'M')+(a*k).toFixed(1)+' '+((b*ct-z*st)*k).toFixed(1);
+      }
+      el.setAttribute('d',d+'Z');
+    }
+    const reveal=ease(2.02,2.45,t)*(1-ease(4.48,4.87,t));
+    const glitch=(t>2.04&&t<2.33)||(t>4.54&&t<4.66);
+    $('title').setAttribute('opacity',reveal);
+    $('title').setAttribute('transform',`translate(540 ${1128+32*(1-reveal)}) scale(${.93+.07*reveal})`);
+    $('cut').setAttribute('y',-132+((t*175)%120));
+    $('echo').setAttribute('opacity',glitch?.96:0);
+    $('echo').setAttribute('x',Math.sin(t*167)*24);
+    $('boot').setAttribute('opacity',power*(1-ease(1.78,2.08,t)));
+    $('loading').setAttribute('stroke-dashoffset',276*(1-ease(0,1.83,t)));
+    $('bootLabel').textContent=t<.7?'01 / SEED':t<1.36?'02 / COMPILE':'03 / SYNCHRONIZE';
+    $('status').textContent=t<.7?'SYSTEM / INIT':t<2.1?'LATENT / BUILD':t<4.52?'SIGNAL / LOCKED':'BUFFER / RESET';
+    $('clock').textContent='00:0'+Math.floor(t)+'.'+String(Math.floor(t*100)%100).padStart(2,'0');
+    bars.forEach((b,i)=>b.setAttribute('fill',i/64<t/5?'#86e7d0':'#273540'));
+    for(const {el,y,phase:p} of specks) {
+      el.setAttribute('cy',y+19*Math.sin(phase+p));
+      el.setAttribute('opacity',.35+.3*Math.sin(phase+p));
+    }
+    $('flare').setAttribute('opacity',.19*Math.exp(-((t-2.09)**2)/.0008));
+    requestAnimationFrame(frame);
+  }
+  frame(epoch);
+})();
+</script>
+</body>
+</html>

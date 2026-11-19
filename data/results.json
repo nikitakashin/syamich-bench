@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-13",
+  "updated": "2026-11-19",
   "reference": "anthropic/claude-opus-5.5",
   "models": [
     {
@@ -329,6 +329,76 @@
       "duel": null
     },
     {
+      "id": "openai/gpt-6.2-astra",
+      "name": "GPT-6.2 Astra",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 9.0,
+        "заставка": 5.0,
+        "3d-сцена": 4.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 3527,
+          "tokens_out": 134,
+          "tokens_total": 3661,
+          "cost": 0.033576,
+          "estimated": false
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1137,
+          "tokens_out": 10719,
+          "tokens_total": 11856,
+          "cost": 0.440124,
+          "estimated": false
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 216,
+          "tokens_out": 3133,
+          "tokens_total": 3349,
+          "cost": 0.127048,
+          "estimated": false
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 218,
+          "tokens_out": 4670,
+          "tokens_total": 4888,
+          "cost": 0.188544,
+          "estimated": false
+        }
+      },
+      "works": {
+        "заставка": {
+          "url": "works/openai/gpt-6.2-astra/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/openai/gpt-6.2-astra/city.html"
+        },
+        "портрет": {
+          "url": "works/openai/gpt-6.2-astra/portrait.svg"
+        }
+      },
+      "quality": 7.0,
+      "efficiency": 8.028965962304312,
+      "total": 73.08689788691294,
+      "price": 0.789292,
+      "calls": 8,
+      "seconds": 359.1,
+      "tokens_out": 18656,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-11-19",
+      "duel": {
+        "reference": "google/gemini-4-neon",
+        "total": 74.71069488356959
+      }
+    },
+    {
       "id": "anthropic/claude-opus-5.5",
       "name": "Claude Opus 5.5",
       "complete": true,
@@ -532,6 +602,73 @@
       "duel": {
         "reference": "openai/gpt-6.1-terra",
         "total": 48.70461454439777
+      }
+    },
+    {
+      "id": "google/gemini-4-neon",
+      "name": "Gemini 4 Neon",
+      "complete": true,
+      "tasks": {
+        "пальцы": 10.0,
+        "портрет": 1.0,
+        "заставка": 7.0,
+        "3d-сцена": 6.0
+      },
+      "task_usage": {
+        "пальцы": {
+          "runs": 5,
+          "tokens_in": 5875,
+          "tokens_out": 3092,
+          "tokens_total": 8967,
+          "cost": 0.064005,
+          "estimated": false
+        },
+        "портрет": {
+          "runs": 1,
+          "tokens_in": 1278,
+          "tokens_out": 65536,
+          "tokens_total": 66814,
+          "cost": 0.986874,
+          "estimated": false
+        },
+        "заставка": {
+          "runs": 1,
+          "tokens_in": 250,
+          "tokens_out": 19637,
+          "tokens_total": 19887,
+          "cost": 0.295305,
+          "estimated": false
+        },
+        "3d-сцена": {
+          "runs": 1,
+          "tokens_in": 252,
+          "tokens_out": 31384,
+          "tokens_total": 31636,
+          "cost": 0.471516,
+          "estimated": false
+        }
+      },
+      "works": {
+        "заставка": {
+          "url": "works/google/gemini-4-neon/intro.html"
+        },
+        "3d-сцена": {
+          "url": "works/google/gemini-4-neon/city.html"
+        }
+      },
+      "quality": 6.0,
+      "efficiency": 5.899366835282571,
+      "total": 59.698100505847705,
+      "price": 1.8177,
+      "calls": 8,
+      "seconds": 1181.9,
+      "tokens_out": 119649,
+      "fingers": 5,
+      "correct": 5,
+      "last": "2026-11-19",
+      "duel": {
+        "reference": "google/gemini-4-neon",
+        "total": 56.99999999999999
       }
     },
     {

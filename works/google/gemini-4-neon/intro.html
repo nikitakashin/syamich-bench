@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>AI Native Сямыч — Intro</title>
+<style>
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #03040a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .stage {
+    position: relative;
+    width: min(100vw, calc(100vh * 9 / 16));
+    height: min(100vh, calc(100vw * 16 / 9));
+    background: #04060e;
+    box-shadow:
+      0 0 80px rgba(0, 240, 255, 0.14),
+      0 0 160px rgba(157, 78, 221, 0.12),
+      0 0 0 1px rgba(0, 240, 255, 0.12);
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <canvas id="intro" width="1080" height="1920"></canvas>
+</div>
+<script>
+(() => {
+  'use strict';
+
+  const W = 1080;
+  const H = 1920;
+  const CX = W * 0.5;
+  const CY = H * 0.5;
+  const DURATION = 5.0;
+
+  const canvas = document.getElementById('intro');
+  const ctx = canvas.getContext('2d', { alpha: false });
+
+  // Deterministic PRNG (Mulberry32)
+  function createRNG(seed) {
+    let a = seed >>> 0;
+    return function() {
+      a |= 0;
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // Math & Easing utilities
+  const clamp = (v, min, max) => (v < min ? min : v > max ? max : v);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const norm = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+
+  const easeOutExpo = t => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+  const easeInExpo = t => (t <= 0 ? 0 : Math.pow(2, 10 * t - 10));
+  const easeInOutExpo = t =>
+    t <= 0 ? 0 : t >= 1 ? 1 : t < 0.5 ? Math.pow(2, 20 * t - 10) / 2 : (2 - Math.pow(2, -20 * t + 10)) / 2;
+  const easeOutBack = t => {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  };
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+  const easeInCubic = t => t * t * t;
+  const easeInOutSine = t => -(Math.cos(Math.PI * t) - 1) / 2;
+
+  // Color Palette
+  const COL = {
+    bg: '#04060e',
+    cyan: '#00f2ff',
+    magenta: '#ff007a',
+    violet: '#8a2be2',
+    electric: '#3b82f6',
+    white: '#ffffff'
+  };
+
+  const FONT_DISPLAY = '"Arial Black", "Segoe UI Black", "SF Pro Display", "Roboto", "Helvetica Neue", Arial, sans-serif';
+  const FONT_MONO = '"JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Consolas, "Courier New", monospace';
+
+  // =========================================================================
+  // PRE-GENERATED SCENE DATA (100% deterministic for seamless 5s looping)
+  // =========================================================================
+  const rng = createRNG(20250916);
+
+  // 1. 3D Neural Network Fibonacci Sphere
+  const NUM_NODES = 68;
+  const nodes = [];
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < NUM_NODES; i++) {
+    const y = 1 - (i / (NUM_NODES - 1)) * 2;
+    const r = Math.sqrt(1 - y * y);
+    const theta = goldenAngle * i;
+    const radScale = 0.86 + rng() * 0.28;
+    nodes.push({
+      x: Math.cos(theta) * r * radScale,
+      y: y * radScale,
+      z: Math.sin(theta) * r * radScale,
+      size: 2.5 + rng() * 4.5,
+      phase: rng() * Math.PI * 2,
+      colorType: rng() > 0.38 ? 0 : 1 // 0 cyan, 1 magenta
+    });
+  }
+
+  const edges = [];
+  for (let i = 0; i < NUM_NODES; i++) {
+    for (let j = i + 1; j < NUM_NODES; j++) {
+      const dx = nodes[i].x - nodes[j].x;
+      const dy = nodes[i].y - nodes[j].y;
+      const dz = nodes[i].z - nodes[j].z;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d < 0.62) {
+        edges.push({
+          a: i,
+          b: j,
+          pulseSpeed: 1 + Math.floor(rng() * 3),
+          pulseOffset: rng(),
+          hasPulse: rng() > 0.45
+        });
+      }
+    }
+  }
+
+  // 2. Vibecoding Floating Code Snippets
+  const CODE_LINES = [
+    'const ai = new NativeCore();',
+    'await vibe.compile({ mode: "HYPER" });',
+    'neural.weights.sync(0xFF9A);',
+    'prompt >> synthesize(reality);',
+    'export default function SYAMYCH() {}',
+    'tensor.matmul(q, k.T).softmax();',
+    '>> DEPLOYING AI_NATIVE_V3...',
+    'let flow = code.vibing ? Infinity : 0;',
+    '0x7F 0xA4 0x00 // SYNAPSE_OK',
+    'agent.think({ depth: 999 });',
+    'pipeline.stream("NEXT_GEN_TECH");',
+    'if (glitch) render.overdrive();',
+    'model.infer({ temp: 0.92, topP: 1 });',
+    'shader.emit(NEON_PULSE);'
+  ];
+
+  const codeStreams = [];
+  for (let i = 0; i < 24; i++) {
+    const colX = (i % 6) * (W / 5.5) - 30 + (rng() - 0.5) * 90;
+    codeStreams.push({
+      x: colX,
+      yOffset: rng(),
+      speed: 0.35 + rng() * 0.55,
+      text: CODE_LINES[i % CODE_LINES.length],
+      size: 16 + Math.floor(rng() * 11),
+      alpha: 0.14 + rng() * 0.28,
+      tint: rng() > 0.3 ? COL.cyan : COL.magenta,
+      depth: 0.4 + rng() * 0.9
+    });
+  }
+
+  // 3. Ambient Depth Stars / Energy Dust (seamless periodic Z)
+  const stars = [];
+  for (let i = 0; i < 140; i++) {
+    const angle = rng() * Math.PI * 2;
+    const dist = 0.08 + Math.pow(rng(), 0.7) * 1.1;
+    stars.push({
+      ax: Math.cos(angle) * dist,
+      ay: Math.sin(angle) * dist,
+      zPhase: rng(),
+      speed: 1 + Math.floor(rng() * 2),
+      size: 1.5 + rng() * 3.5,
+      color: rng() > 0.4 ? COL.cyan : rng() > 0.5 ? COL.magenta : COL.white
+    });
+  }
+
+  // 4. Impact Burst Sparks
+  const sparks = [];
+  for (let i = 0; i < 110; i++) {
+    const angle = rng() * Math.PI * 2;
+    const speed = 280 + Math.pow(rng(), 0.65) * 1250;
+    sparks.push({
+      angle,
+      speed,
+      len: 18 + rng() * 68,
+      width: 1.5 + rng() * 3.5,
+      drag: 1.8 + rng() * 2.4,
+      color: rng() > 0.45 ? COL.cyan : rng() > 0.45 ? COL.magenta : COL.white,
+      delay: rng() * 0.06
+    });
+  }
+
+  // 5. Horizontal Light Streaks (Speed Lines)
+  const streaks = [];
+  for (let i = 0; i < 28; i++) {
+    streaks.push({
+      y: rng() * H,
+      xPhase: rng(),
+      width: 160 + rng() * 480,
+      height: 1.5 + rng() * 3,
+      speed: 2 + Math.floor(rng() * 3),
+      color: rng() > 0.5 ? COL.cyan : COL.magenta,
+      alpha: 0.25 + rng() * 0.5
+    });
+  }
+
+  // =========================================================================
+  // PRE-RENDERED OFFSCREEN TYPOGRAPHY FOR CRISP GLITCH & CHROMATIC ABERRATION
+  // =========================================================================
+  function createTitleBuffers() {
+    const bw = 1080;
+    const bh = 420;
+    const text = 'СЯМЫЧ';
+
+    // Measure dynamically so typography looks bold and perfectly framed across all OS fonts
+    const probe = document.createElement('canvas').getContext('2d');
+    let fontSize = 230;
+    probe.font = `900 ${fontSize}px ${FONT_DISPLAY}`;
+    const letterSpacing = 12;
+    const measureSpaced = (c, str, sp) => {
+      let total = 0;
+      for (let i = 0; i < str.length; i++) {
+        total += c.measureText(str[i]).width + (i < str.length - 1 ? sp : 0);
+      }
+      return total;
+    };
+    while (measureSpaced(probe, text, letterSpacing) > 910 && fontSize > 110) {
+      fontSize -= 4;
+      probe.font = `900 ${fontSize}px ${FONT_DISPLAY}`;
+    }
+
+    const drawSpacedText = (c, str, cx, cy, sp, mode) => {
+      const total = measureSpaced(c, str, sp);
+      let curX = cx - total / 2;
+      c.textAlign = 'left';
+      c.textBaseline = 'middle';
+      for (let i = 0; i < str.length; i++) {
+        const ch = str[i];
+        if (mode === 'stroke') c.strokeText(ch, curX, cy);
+        else c.fillText(ch, curX, cy);
+        curX += c.measureText(ch).width + sp;
+      }
+    };
+
+    const makeLayer = (drawFn) => {
+      const c = document.createElement('canvas');
+      c.width = bw;
+      c.height = bh;
+      const g = c.getContext('2d');
+      g.font = `900 ${fontSize}px ${FONT_DISPLAY}`;
+      drawFn(g, bw / 2, bh / 2);
+      return c;
+    };
+
+    // Main premium metallic/neon hero text
+    const main = makeLayer((g, cx, cy) => {
+      // Deep outer glow
+      g.save();
+      g.shadowColor = 'rgba(0, 242, 255, 0.78)';
+      g.shadowBlur = 42;
+      g.fillStyle = '#ffffff';
+      drawSpacedText(g, text, cx, cy, letterSpacing, 'fill');
+      g.restore();
+
+      // Crisp metallic gradient fill
+      const grad = g.createLinearGradient(0, cy - fontSize * 0.55, 0, cy + fontSize * 0.55);
+      grad.addColorStop(0.0, '#ffffff');
+      grad.addColorStop(0.42, '#f0fbff');
+      grad.addColorStop(0.55, '#b8efff');
+      grad.addColorStop(0.82, '#e4d4ff');
+      grad.addColorStop(1.0, '#ffffff');
+      g.fillStyle = grad;
+      drawSpacedText(g, text, cx, cy, letterSpacing, 'fill');
+
+      // Razor-sharp luminous rim stroke
+      g.lineWidth = 3.5;
+      const strokeGrad = g.createLinearGradient(cx - 420, cy, cx + 420, cy);
+      strokeGrad.addColorStop(0, '#00f2ff');
+      strokeGrad.addColorStop(0.5, '#ffffff');
+      strokeGrad.addColorStop(1, '#ff007a');
+      g.strokeStyle = strokeGrad;
+      drawSpacedText(g, text, cx, cy, letterSpacing, 'stroke');
+    });
+
+    // Cyan RGB channel layer
+    const cyan = makeLayer((g, cx, cy) => {
+      g.shadowColor = 'rgba(0, 242, 255, 0.9)';
+      g.shadowBlur = 22;
+      g.fillStyle = '#00f2ff';
+      drawSpacedText(g, text, cx, cy, letterSpacing, 'fill');
+    });
+
+    // Magenta RGB channel layer
+    const magenta = makeLayer((g, cx, cy) => {
+      g.shadowColor = 'rgba(255, 0, 122, 0.9)';
+      g.shadowBlur = 22;
+      g.fillStyle = '#ff007a';
+      drawSpacedText(g, text, cx, cy, letterSpacing, 'fill');
+    });
+
+    // Pure white mask for specular diagonal sheen
+    const mask = makeLayer((g, cx, cy) => {
+      g.fillStyle = '#ffffff';
+      drawSpacedText(g, text, cx, cy, letterSpacing, 'fill');
+    });
+
+    return { main, cyan, magenta, mask, bw, bh, fontSize };
+  }
+
+  const titleBuf = createTitleBuffers();
+
+  // Sheen scratch buffer
+  const sheenCanvas = document.createElement('canvas');
+  sheenCanvas.width = titleBuf.bw;
+  sheenCanvas.height = titleBuf.bh;
+  const sheenCtx = sheenCanvas.getContext('2d');
+
+  // Pre-render subtle scanline pattern
+  const scanPatternCanvas = document.createElement('canvas');
+  scanPatternCanvas.width = 4;
+  scanPatternCanvas.height = 6;
+  const spCtx = scanPatternCanvas.getContext('2d');
+  spCtx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  spCtx.fillRect(0, 0, 4, 2);
+  const scanPattern = ctx.createPattern(scanPatternCanvas, 'repeat');
+
+  // =========================================================================
+  // RENDER MODULES
+  // =========================================================================
+
+  function drawBackground(t, energy) {
+    // Deep cyber obsidian gradient
+    const bgGrad = ctx.createRadialGradient(CX, CY * 0.94, 40, CX, CY, H * 0.78);
+    bgGrad.addColorStop(0, energy > 0.3 ? '#0e1735' : '#091026');
+    bgGrad.addColorStop(0.45, '#060916');
+    bgGrad.addColorStop(1, '#020308');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle atmospheric neon nebulas
+    const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    const g1 = ctx.createRadialGradient(CX - 260, CY - 340, 20, CX - 260, CY - 340, 620);
+    g1.addColorStop(0, `rgba(0, 242, 255, ${0.11 + energy * 0.1 + pulse * 0.03})`);
+    g1.addColorStop(1, 'rgba(0, 242, 255, 0)');
+    ctx.fillStyle = g1;
+    ctx.fillRect(0, 0, W, H);
+
+    const g2 = ctx.createRadialGradient(CX + 280, CY + 290, 20, CX + 280, CY + 290, 660);
+    g2.addColorStop(0, `rgba(255, 0, 122, ${0.09 + energy * 0.11})`);
+    g2.addColorStop(1, 'rgba(255, 0, 122, 0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(0, 0, W, H);
+
+    const g3 = ctx.createRadialGradient(CX, CY, 10, CX, CY, 540);
+    g3.addColorStop(0, `rgba(138, 43, 226, ${0.08 + energy * 0.14})`);
+    g3.addColorStop(1, 'rgba(138, 43, 226, 0)');
+    ctx.fillStyle = g3;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.restore();
+  }
+
+  function drawCyberGrid(t, warpFactor) {
+    ctx.save();
+    const horizonY = CY;
+    const gridTravel = (t * 2.4 + warpFactor * 1.6) % 1;
+
+    // Draw symmetric floor and ceiling perspective grids
+    for (const dir of [-1, 1]) {
+      ctx.save();
+      ctx.beginPath();
+      if (dir === 1) ctx.rect(0, horizonY, W, H - horizonY);
+      else ctx.rect(0, 0, W, horizonY);
+      ctx.clip();
+
+      const maxDist = H * 0.56;
+      const numH = 16;
+
+      // Horizontal depth lines
+      for (let i = 0; i < numH; i++) {
+        const p = (i + gridTravel) / numH;
+        const depth = Math.pow(p, 2.35);
+        const y = horizonY + dir * (22 + depth * maxDist);
+        const alpha = clamp(depth * 0.42 * (1 - p * 0.15), 0, 0.45);
+        ctx.strokeStyle = dir === 1
+          ? `rgba(0, 242, 255, ${alpha})`
+          : `rgba(168, 85, 247, ${alpha * 0.78})`;
+        ctx.lineWidth = 1 + depth * 1.6;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+      }
+
+      // Radiating longitudinal perspective lines
+      const numV = 14;
+      for (let j = -numV; j <= numV; j++) {
+        const spread = j / numV;
+        const endX = CX + spread * W * 2.7;
+        const endY = horizonY + dir * maxDist;
+        const grad = ctx.createLinearGradient(CX, horizonY, CX, endY);
+        grad.addColorStop(0, 'rgba(0, 242, 255, 0)');
+        grad.addColorStop(0.28, dir === 1 ? 'rgba(0, 242, 255, 0.14)' : 'rgba(255, 0, 122, 0.12)');
+        grad.addColorStop(1, dir === 1 ? 'rgba(0, 242, 255, 0.34)' : 'rgba(138, 43, 226, 0.24)');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.25;
+        ctx.beginPath();
+        ctx.moveTo(CX + spread * 40, horizonY + dir * 18);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    // Horizon glow line
+    ctx.globalCompositeOperation = 'lighter';
+    const hGrad = ctx.createLinearGradient(0, horizonY, W, horizonY);
+    hGrad.addColorStop(0, 'rgba(0, 242, 255, 0)');
+    hGrad.addColorStop(0.25, 'rgba(0, 242, 255, 0.25)');
+    hGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.45)');
+    hGrad.addColorStop(0.75, 'rgba(255, 0, 122, 0.25)');
+    hGrad.addColorStop(1, 'rgba(255, 0, 122, 0)');
+    ctx.fillStyle = hGrad;
+    ctx.fillRect(0, horizonY - 1.5, W, 3);
+    ctx.restore();
+  }
+
+  function drawStarfield(t, warpBoost) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const prog = t / DURATION;
+
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      // Periodic Z from 1.0 down to 0.02
+      let z = 1 - ((s.zPhase + prog * s.speed + warpBoost * 0.45) % 1);
+      if (z < 0.03) continue;
+      const invZ = 1 / z;
+      const x = CX + s.ax * 420 * invZ;
+      const y = CY + s.ay * 680 * invZ;
+      if (x < -100 || x > W + 100 || y < -100 || y > H + 100) continue;
+
+      const prevZ = z + 0.025 + warpBoost * 0.09;
+      const px = CX + s.ax * 420 / prevZ;
+      const py = CY + s.ay * 680 / prevZ;
+
+      const alpha = clamp((1 - z) * 1.15, 0, 0.9);
+      ctx.strokeStyle = s.color;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = clamp(s.size * (1 - z * 0.65), 1, 5);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawCodeStreams(t, globalFade) {
+    ctx.save();
+    const prog = t / DURATION;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+
+    for (let i = 0; i < codeStreams.length; i++) {
+      const cs = codeStreams[i];
+      const yNorm = (cs.yOffset + prog * cs.speed * 2.0) % 1;
+      const y = -80 + yNorm * (H + 160);
+      // Soft vertical edge fade
+      const edgeAlpha = Math.sin(yNorm * Math.PI);
+      const a = cs.alpha * edgeAlpha * globalFade;
+      if (a <= 0.01) continue;
+
+      ctx.font = `600 ${cs.size}px ${FONT_MONO}`;
+      ctx.fillStyle = cs.tint;
+      ctx.globalAlpha = a;
+
+      // Subtle typing cursor effect on some lines
+      const chars = Math.floor(((t * 16 + i * 7) % (cs.text.length + 14)));
+      const visible = cs.text.slice(0, clamp(chars, 4, cs.text.length));
+      ctx.fillText(visible, cs.x, y);
+
+      if (i % 3 === 0) {
+        ctx.fillStyle = COL.white;
+        ctx.globalAlpha = a * 1.3;
+        const w = ctx.measureText(visible).width;
+        ctx.fillRect(cs.x + w + 4, y - cs.size * 0.45, cs.size * 0.45, cs.size * 0.9);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawNeuralCore(t, radiusScale, alphaMul, centerY) {
+    if (alphaMul <= 0.01) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Exact periodic rotation over 5s
+    const rotY = (t / DURATION) * Math.PI * 2;
+    const rotX = Math.sin((t / DURATION) * Math.PI * 2) * 0.35 + 0.25;
+    const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+    const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+
+    const baseR = 390 * radiusScale;
+    const fov = 920;
+
+    // Project 3D nodes
+    const proj = new Array(NUM_NODES);
+    for (let i = 0; i < NUM_NODES; i++) {
+      const n = nodes[i];
+      // Rotate Y
+      const x1 = n.x * cosY - n.z * sinY;
+      const z1 = n.x * sinY + n.z * cosY;
+      // Rotate X
+      const y2 = n.y * cosX - z1 * sinX;
+      const z2 = n.y * sinX + z1 * cosX;
+
+      const scale = fov / (fov + z2 * baseR + 280);
+      proj[i] = {
+        x: CX + x1 * baseR * scale,
+        y: centerY + y2 * baseR * scale,
+        z: z2,
+        scale
+      };
+    }
+
+    // Draw Synaptic Connections & Pulses
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      const p1 = proj[e.a];
+      const p2 = proj[e.b];
+      const avgZ = (p1.z + p2.z) * 0.5;
+      const depthAlpha = clamp(0.58 - avgZ * 0.4, 0.08, 0.72) * alphaMul;
+
+      ctx.strokeStyle = avgZ < 0
+        ? `rgba(0, 242, 255, ${depthAlpha * 0.42})`
+        : `rgba(138, 43, 226, ${depthAlpha * 0.34})`;
+      ctx.lineWidth = avgZ < 0 ? 1.6 : 1.0;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+
+      // Traveling electric synapse spark
+      if (e.hasPulse) {
+        const pt = (e.pulseOffset + (t / DURATION) * e.pulseSpeed * 2) % 1;
+        const sx = lerp(p1.x, p2.x, pt);
+        const sy = lerp(p1.y, p2.y, pt);
+        ctx.fillStyle = pt < 0.5 ? COL.cyan : COL.magenta;
+        ctx.globalAlpha = depthAlpha * 1.15;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2.4 * ((p1.scale + p2.scale) * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // Draw Glowing Nodes
+    for (let i = 0; i < NUM_NODES; i++) {
+      const n = nodes[i];
+      const p = proj[i];
+      const blink = 0.65 + 0.35 * Math.sin(t * 7 + n.phase);
+      const a = clamp((0.75 - p.z * 0.42) * blink * alphaMul, 0.05, 1);
+      const r = n.size * p.scale * (0.85 + radiusScale * 0.15);
+
+      ctx.globalAlpha = a * 0.42;
+      ctx.fillStyle = n.colorType === 0 ? COL.cyan : COL.magenta;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 2.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = a;
+      ctx.fillStyle = COL.white;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function drawHUDRings(t, centerY, chargeProgress, heroAlpha) {
+    ctx.save();
+    ctx.translate(CX, centerY);
+    ctx.globalCompositeOperation = 'lighter';
+
+    const ringScale = chargeProgress < 1
+      ? lerp(1.45, 0.65, easeInExpo(chargeProgress))
+      : lerp(0.96, 1.05, 0.5 + 0.5 * Math.sin(t * 3.5));
+    const baseAlpha = chargeProgress < 1
+      ? lerp(0.15, 0.9, chargeProgress)
+      : 0.36 * heroAlpha;
+
+    ctx.scale(ringScale, ringScale);
+
+    // Outer dashed orbital ring
+    ctx.save();
+    ctx.rotate((t / DURATION) * Math.PI * 2);
+    ctx.strokeStyle = `rgba(0, 242, 255, ${baseAlpha})`;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([42, 22, 10, 18]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 410, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Counter-rotating magenta precision segments
+    ctx.save();
+    ctx.rotate(-(t / DURATION) * Math.PI * 4);
+    ctx.strokeStyle = `rgba(255, 0, 122, ${baseAlpha * 0.85})`;
+    ctx.lineWidth = 4;
+    for (let k = 0; k < 4; k++) {
+      const a0 = k * (Math.PI / 2) + 0.18;
+      ctx.beginPath();
+      ctx.arc(0, 0, 355, a0, a0 + 0.65);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Circular AI Audio Spectrum / Equalizer ticks
+    const numBars = 64;
+    const innerR = 285;
+    for (let i = 0; i < numBars; i++) {
+      const angle = (i / numBars) * Math.PI * 2 + t * 0.4;
+      const wave =
+        Math.abs(Math.sin(i * 0.55 + t * 8.5)) * 0.6 +
+        Math.abs(Math.cos(i * 1.1 - t * 6.0)) * 0.4;
+      const barH = 10 + wave * (chargeProgress < 1 ? 68 : 42);
+      const x1 = Math.cos(angle) * innerR;
+      const y1 = Math.sin(angle) * innerR;
+      const x2 = Math.cos(angle) * (innerR + barH);
+      const y2 = Math.sin(angle) * (innerR + barH);
+
+      ctx.strokeStyle = i % 2 === 0
+        ? `rgba(0, 242, 255, ${baseAlpha * 0.85})`
+        : `rgba(157, 78, 221, ${baseAlpha * 0.85})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    // Charging inner singularity core (0.8s -> 1.72s)
+    if (chargeProgress > 0 && chargeProgress < 1) {
+      const coreR = lerp(12, 120, easeInCubic(chargeProgress));
+      const cGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR * 2.2);
+      cGrad.addColorStop(0, '#ffffff');
+      cGrad.addColorStop(0.28, 'rgba(0, 242, 255, 0.95)');
+      cGrad.addColorStop(0.6, 'rgba(255, 0, 122, 0.5)');
+      cGrad.addColorStop(1, 'rgba(138, 43, 226, 0)');
+      ctx.fillStyle = cGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, coreR * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function drawImpactFX(t, impactTime, centerY) {
+    const dt = t - impactTime;
+    if (dt < 0 || dt > 1.6) return;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // 1. Instant white-cyan flash
+    if (dt < 0.28) {
+      const flashA = Math.pow(1 - dt / 0.28, 2.2) * 0.72;
+      const fGrad = ctx.createRadialGradient(CX, centerY, 10, CX, centerY, 950);
+      fGrad.addColorStop(0, `rgba(255, 255, 255, ${flashA})`);
+      fGrad.addColorStop(0.35, `rgba(0, 242, 255, ${flashA * 0.7})`);
+      fGrad.addColorStop(0.7, `rgba(255, 0, 122, ${flashA * 0.35})`);
+      fGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = fGrad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // 2. Dual Expanding Shockwave Rings
+    if (dt < 0.95) {
+      const p1 = easeOutExpo(dt / 0.95);
+      const r1 = 40 + p1 * 920;
+      ctx.strokeStyle = `rgba(0, 242, 255, ${(1 - p1) * 0.95})`;
+      ctx.lineWidth = (1 - p1) * 26 + 2;
+      ctx.beginPath();
+      ctx.arc(CX, centerY, r1, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const p2 = easeOutExpo(clamp((dt - 0.06) / 0.88, 0, 1));
+      if (p2 > 0) {
+        const r2 = 30 + p2 * 780;
+        ctx.strokeStyle = `rgba(255, 0, 122, ${(1 - p2) * 0.8})`;
+        ctx.lineWidth = (1 - p2) * 14 + 1;
+        ctx.beginPath();
+        ctx.arc(CX, centerY, r2, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // 3. Anamorphic Horizontal Lens Flare Streak
+    if (dt < 1.1) {
+      const fp = 1 - easeOutCubic(dt / 1.1);
+      const flareH = 6 + fp * 58;
+      const flGrad = ctx.createLinearGradient(0, centerY, W, centerY);
+      flGrad.addColorStop(0, 'rgba(0, 242, 255, 0)');
+      flGrad.addColorStop(0.2, `rgba(0, 242, 255, ${fp * 0.55})`);
+      flGrad.addColorStop(0.5, `rgba(255, 255, 255, ${fp * 0.95})`);
+      flGrad.addColorStop(0.8, `rgba(255, 0, 122, ${fp * 0.55})`);
+      flGrad.addColorStop(1, 'rgba(255, 0, 122, 0)');
+      ctx.fillStyle = flGrad;
+      ctx.fillRect(0, centerY - flareH * 0.5, W, flareH);
+    }
+
+    // 4. Radial Spark Explosion
+    for (let i = 0; i < sparks.length; i++) {
+      const sp = sparks[i];
+      const sdt = dt - sp.delay;
+      if (sdt <= 0 || sdt > 1.2) continue;
+
+      const dist = (sp.speed / sp.drag) * (1 - Math.exp(-sp.drag * sdt));
+      const vel = sp.speed * Math.exp(-sp.drag * sdt);
+      const tailLen = clamp(sp.len * (vel / sp.speed) * 1.4, 4, sp.len);
+      const alpha = clamp(1 - sdt / 1.15, 0, 1);
+
+      const x1 = CX + Math.cos(sp.angle) * dist;
+      const y1 = centerY + Math.sin(sp.angle) * dist;
+      const x2 = CX + Math.cos(sp.angle) * Math.max(0, dist - tailLen);
+      const y2 = centerY + Math.sin(sp.angle) * Math.max(0, dist - tailLen);
+
+      ctx.strokeStyle = sp.color;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = sp.width;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawHeroTitle(t, centerY, glitchIntensity) {
+    // Timeline: Reveal at 1.70s, hold until 4.35s, glitch-dissolve by 4.80s
+    if (t < 1.68 || t > 4.84) return;
+
+    const enterT = norm(t, 1.70, 2.12);
+    const exitT = norm(t, 4.35, 4.82);
+
+    const scaleIn = lerp(2.35, 1.0, easeOutExpo(enterT));
+    const scaleOut = lerp(1.0, 1.24, easeInExpo(exitT));
+    const scale = scaleIn * scaleOut;
+
+    const alphaIn = easeOutCubic(norm(t, 1.68, 1.84));
+    const alphaOut = 1 - easeInCubic(exitT);
+    const alpha = alphaIn * alphaOut;
+    if (alpha <= 0.01) return;
+
+    // Dark soft backing aura behind typography to guarantee razor-sharp readability
+    ctx.save();
+    const backGrad = ctx.createRadialGradient(CX, centerY + 35, 60, CX, centerY + 35, 520);
+    backGrad.addColorStop(0, `rgba(3, 5, 14, ${0.78 * alpha})`);
+    backGrad.addColorStop(0.65, `rgba(3, 5, 14, ${0.42 * alpha})`);
+    backGrad.addColorStop(1, 'rgba(3, 5, 14, 0)');
+    ctx.fillStyle = backGrad;
+    ctx.fillRect(0, centerY - 380, W, 820);
+    ctx.restore();
+
+    const { main, cyan, magenta, mask, bw, bh } = titleBuf;
+    const drawX = -bw / 2;
+    const drawY = -bh / 2;
+
+    // Subtle floating breath during hero hold
+    const floatY = Math.sin(t * 3.4) * 5 * (1 - exitT);
+
+    ctx.save();
+    ctx.translate(CX, centerY + floatY);
+    ctx.scale(scale, scale);
+
+    // Chromatic Aberration offset (strong on impact, glitch hits, and exit)
+    const impactSplit = (1 - easeOutExpo(norm(t, 1.70, 2.25))) * 34;
+    const exitSplit = easeInCubic(exitT) * 44;
+    const rgbShift = 3.5 + impactSplit + exitSplit + glitchIntensity * 26;
+
+    // Draw RGB Split Channels (additive)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = alpha * clamp(0.45 + glitchIntensity * 0.55 + impactSplit * 0.02, 0, 0.92);
+    ctx.drawImage(cyan, drawX - rgbShift, drawY - rgbShift * 0.12);
+    ctx.drawImage(magenta, drawX + rgbShift, drawY + rgbShift * 0.12);
+    ctx.restore();
+
+    // Draw Main Crisp Typography (with horizontal glitch slicing when triggered)
+    ctx.globalAlpha = alpha;
+    if (glitchIntensity > 0.08 || exitT > 0.12) {
+      const sliceRNG = createRNG(Math.floor(t * 48) * 997 + 13);
+      const numSlices = 14;
+      const sliceH = bh / numSlices;
+      const maxDisp = (glitchIntensity * 75 + exitT * 140);
+
+      for (let s = 0; s < numSlices; s++) {
+        const sy = s * sliceH;
+        const doShift = sliceRNG() < (0.38 + exitT * 0.55);
+        const dx = doShift ? (sliceRNG() - 0.5) * 2 * maxDisp : 0;
+        const extraAlpha = exitT > 0.35 && sliceRNG() < exitT ? 0.25 : 1;
+        ctx.globalAlpha = alpha * extraAlpha;
+        ctx.drawImage(main, 0, sy, bw, sliceH, drawX + dx, drawY + sy, bw, sliceH);
+      }
+    } else {
+      ctx.drawImage(main, drawX, drawY);
+    }
+
+    // Dynamic Diagonal Metallic Light Sheen Sweep across "СЯМЫЧ" (2.35s -> 3.65s)
+    const sheenT = norm(t, 2.35, 3.65);
+    if (sheenT > 0 && sheenT < 1 && exitT < 0.05) {
+      sheenCtx.clearRect(0, 0, bw, bh);
+      sheenCtx.globalCompositeOperation = 'source-over';
+      sheenCtx.drawImage(mask, 0, 0);
+      sheenCtx.globalCompositeOperation = 'source-in';
+
+      const sweepX = lerp(-240, bw + 240, easeInOutSine(sheenT));
+      const sGrad = sheenCtx.createLinearGradient(sweepX - 110, 0, sweepX + 110, bh);
+      sGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      sGrad.addColorStop(0.45, 'rgba(0, 242, 255, 0.35)');
+      sGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
+      sGrad.addColorStop(0.55, 'rgba(255, 0, 122, 0.35)');
+      sGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      sheenCtx.fillStyle = sGrad;
+      sheenCtx.fillRect(0, 0, bw, bh);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.drawImage(sheenCanvas, drawX, drawY);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  function drawSubtitle(t, subY, glitchIntensity) {
+    if (t < 1.92 || t > 4.78) return;
+
+    const enterT = norm(t, 1.92, 2.42);
+    const exitT = norm(t, 4.30, 4.76);
+    const alpha = easeOutCubic(norm(t, 1.92, 2.15)) * (1 - easeInCubic(exitT));
+    if (alpha <= 0.01) return;
+
+    const floatY = Math.sin(t * 3.4 - 0.6) * 4 * (1 - exitT);
+    const y = subY + floatY + lerp(28, 0, easeOutExpo(enterT));
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Sleek neon cyber pill / frame expanding from center
+    const boxW = lerp(40, 560, easeOutExpo(enterT)) * lerp(1, 1.15, easeInCubic(exitT));
+    const boxH = 104;
+    const x0 = CX - boxW / 2;
+    const y0 = y - boxH / 2;
+
+    // Glassy dark pill fill
+    const pillGrad = ctx.createLinearGradient(x0, y0, x0 + boxW, y0 + boxH);
+    pillGrad.addColorStop(0, 'rgba(0, 242, 255, 0.14)');
+    pillGrad.addColorStop(0.5, 'rgba(8, 13, 30, 0.82)');
+    pillGrad.addColorStop(1, 'rgba(255, 0, 122, 0.14)');
+
+    ctx.beginPath();
+    ctx.roundRect(x0, y0, boxW, boxH, 16);
+    ctx.fillStyle = pillGrad;
+    ctx.fill();
+
+    // Luminous gradient border
+    const borderGrad = ctx.createLinearGradient(x0, y, x0 + boxW, y);
+    borderGrad.addColorStop(0, COL.cyan);
+    borderGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.7)');
+    borderGrad.addColorStop(1, COL.magenta);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = borderGrad;
+    ctx.shadowColor = 'rgba(0, 242, 255, 0.55)';
+    ctx.shadowBlur = 18;
+    ctx.stroke();
+
+    // Tech accent brackets on left & right of pill
+    const br = 18;
+    ctx.shadowBlur = 10;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = COL.cyan;
+    ctx.beginPath();
+    ctx.moveTo(x0 - 16, y0 + br);
+    ctx.lineTo(x0 - 16, y0);
+    ctx.lineTo(x0 - 16 + br, y0);
+    ctx.moveTo(x0 - 16, y0 + boxH - br);
+    ctx.lineTo(x0 - 16, y0 + boxH);
+    ctx.lineTo(x0 - 16 + br, y0 + boxH);
+    ctx.stroke();
+
+    ctx.strokeStyle = COL.magenta;
+    ctx.beginPath();
+    ctx.moveTo(x0 + boxW + 16, y0 + br);
+    ctx.lineTo(x0 + boxW + 16, y0);
+    ctx.lineTo(x0 + boxW + 16 - br, y0);
+    ctx.moveTo(x0 + boxW + 16, y0 + boxH - br);
+    ctx.lineTo(x0 + boxW + 16, y0 + boxH);
+    ctx.lineTo(x0 + boxW + 16 - br, y0 + boxH);
+    ctx.stroke();
+
+    // Decrypting / Glitch-lock text "AI Native"
+    const targetText = 'AI Native';
+    const decodeT = norm(t, 1.98, 2.48);
+    const glyphs = '01X#/$%&@*';
+    let displayStr = '';
+    const dRng = createRNG(Math.floor(t * 36) * 313 + 7);
+    for (let i = 0; i < targetText.length; i++) {
+      const charThresh = (i + 1) / targetText.length;
+      if (targetText[i] === ' ') {
+        displayStr += ' ';
+      } else if (decodeT >= charThresh) {
+        displayStr += targetText[i];
+      } else if (decodeT > charThresh - 0.25) {
+        displayStr += glyphs[Math.floor(dRng() * glyphs.length)];
+      }
+    }
+
+    const jitterX = glitchIntensity > 0.2 ? (dRng() - 0.5) * 24 : 0;
+    ctx.font = `800 58px ${FONT_MONO}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Subtle RGB glow behind subtitle
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = 'rgba(0, 242, 255, 0.55)';
+    ctx.fillText(displayStr, CX - 2.5 + jitterX, y + 1);
+    ctx.fillStyle = 'rgba(255, 0, 122, 0.55)';
+    ctx.fillText(displayStr, CX + 2.5 + jitterX, y + 1);
+    ctx.restore();
+
+    // Crisp foreground "AI Native"
+    ctx.shadowColor = 'rgba(0, 242, 255, 0.7)';
+    ctx.shadowBlur = 16;
+    const subGrad = ctx.createLinearGradient(CX - 220, y, CX + 220, y);
+    subGrad.addColorStop(0, '#c2fbff');
+    subGrad.addColorStop(0.35, '#ffffff');
+    subGrad.addColorStop(0.75, '#ffffff');
+    subGrad.addColorStop(1, '#ffc4e1');
+    ctx.fillStyle = subGrad;
+    ctx.fillText(displayStr, CX + jitterX, y + 2);
+
+    // Subtle pulsing neon laser line under the subtitle box
+    const lineW = boxW * 0.72;
+    const lGrad = ctx.createLinearGradient(CX - lineW / 2, 0, CX + lineW / 2, 0);
+    lGrad.addColorStop(0, 'rgba(0, 242, 255, 0)');
+    lGrad.addColorStop(0.5, 'rgba(0, 242, 255, 0.95)');
+    lGrad.addColorStop(1, 'rgba(255, 0, 122, 0)');
+    ctx.fillStyle = lGrad;
+    ctx.fillRect(CX - lineW / 2, y0 + boxH + 18, lineW, 3);
+
+    // Mini vibe tagline underneath
+    const tagAlpha = easeOutCubic(norm(t, 2.38, 2.75)) * (1 - easeInCubic(exitT));
+    if (tagAlpha > 0.01) {
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = alpha * tagAlpha * 0.72;
+      ctx.font = `600 22px ${FONT_MONO}`;
+      ctx.fillStyle = '#9bd8f5';
+      ctx.fillText('NEURAL  //  VIBECODING  //  FUTURE', CX, y0 + boxH + 56);
+    }
+
+    ctx.restore();
+  }
+
+  function drawSpeedStreaks(t, intensity) {
+    if (intensity <= 0.02) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const prog = t / DURATION;
+
+    for (let i = 0; i < streaks.length; i++) {
+      const s = streaks[i];
+      const x = ((s.xPhase + prog * s.speed * 3.0) % 1.6 - 0.3) * W;
+      ctx.globalAlpha = s.alpha * intensity;
+      const g = ctx.createLinearGradient(x, s.y, x + s.width, s.y);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(0.5, s.color);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, s.y, s.width, s.height);
+    }
+    ctx.restore();
+  }
+
+  function drawFrameHUD(t, glitchIntensity) {
+    ctx.save();
+    const pad = 48;
+    const corner = 42;
+
+    // Corner Cinematic Viewfinder Brackets
+    ctx.strokeStyle = 'rgba(0, 242, 255, 0.45)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    // Top-left
+    ctx.moveTo(pad, pad + corner); ctx.lineTo(pad, pad); ctx.lineTo(pad + corner, pad);
+    // Top-right
+    ctx.moveTo(W - pad - corner, pad); ctx.lineTo(W - pad, pad); ctx.lineTo(W - pad, pad + corner);
+    // Bottom-left
+    ctx.moveTo(pad, H - pad - corner); ctx.lineTo(pad, H - pad); ctx.lineTo(pad + corner, H - pad);
+    // Bottom-right
+    ctx.moveTo(W - pad - corner, H - pad); ctx.lineTo(W - pad, H - pad); ctx.lineTo(W - pad, H - pad - corner);
+    ctx.stroke();
+
+    // Top Telemetry Bar
+    ctx.font = `700 22px ${FONT_MONO}`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+
+    // Blinking REC dot
+    const blink = Math.sin(t * Math.PI * 4) > -0.2;
+    if (blink) {
+      ctx.fillStyle = COL.magenta;
+      ctx.shadowColor = COL.magenta;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(pad + 26, pad + 34, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.fillStyle = 'rgba(220, 245, 255, 0.72)';
+    ctx.fillText('AI.NATIVE // LIVE', pad + 46, pad + 35);
+
+    // Live 5.00s Timecode top-right
+    const sec = Math.floor(t);
+    const ms = Math.floor((t - sec) * 100);
+    const tc = `00:00:0${sec}:${String(ms).padStart(2, '0')}`;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(0, 242, 255, 0.78)';
+    ctx.fillText(tc, W - pad - 20, pad + 35);
+
+    // Bottom Telemetry & Progress Bar
+    const barY = H - pad - 34;
+    const barW = W - pad * 2 - 40;
+    const barX = pad + 20;
+
+    ctx.textAlign = 'left';
+    ctx.font = `600 19px ${FONT_MONO}`;
+    ctx.fillStyle = 'rgba(180, 225, 255, 0.55)';
+    const statusText = t < 1.7 ? 'STATUS: COMPILING_NEURAL_CORE'
+      : t < 4.35 ? 'STATUS: VIBECODE_ENGAGED'
+      : 'STATUS: LOOP_SYNC';
+    ctx.fillText(statusText, barX, barY - 22);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(255, 0, 122, 0.7)';
+    ctx.fillText('9:16 // 60FPS', barX + barW, barY - 22);
+
+    // Progress Track
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.fillRect(barX, barY, barW, 4);
+
+    const pGrad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
+    pGrad.addColorStop(0, COL.cyan);
+    pGrad.addColorStop(1, COL.magenta);
+    ctx.fillStyle = pGrad;
+    ctx.fillRect(barX, barY, barW * (t / DURATION), 4);
+
+    // Glitch Horizontal Artifacts across frame during glitch pulses
+    if (glitchIntensity > 0.15) {
+      const gRng = createRNG(Math.floor(t * 60) * 131 + 5);
+      const count = Math.floor(glitchIntensity * 9);
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < count; i++) {
+        const gy = gRng() * H;
+        const gh = 2 + gRng() * 14;
+        const gw = 120 + gRng() * 720;
+        const gx = gRng() * (W - gw);
+        ctx.fillStyle = gRng() > 0.5
+          ? `rgba(0, 242, 255, ${0.22 * glitchIntensity})`
+          : `rgba(255, 0, 122, ${0.22 * glitchIntensity})`;
+        ctx.fillRect(gx, gy, gw, gh);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function drawPostFX(t) {
+    // Subtle CRT scanlines
+    ctx.save();
+    ctx.fillStyle = scanPattern;
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(0, 0, W, H);
+
+    // Cinematic Vignette
+    const vig = ctx.createRadialGradient(CX, CY, W * 0.36, CX, CY, H * 0.66);
+    vig.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vig.addColorStop(0.72, 'rgba(2, 4, 12, 0.25)');
+    vig.addColorStop(1, 'rgba(2, 3, 8, 0.78)');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, W, H);
+
+    // Seamless dark hyper-pulse at loop seam (4.82s -> 5.0s and 0.0s -> 0.16s)
+    const seamOut = norm(t, 4.82, 5.0);
+    const seamIn = 1 - norm(t, 0.0, 0.18);
+    const seamDark = Math.max(seamOut * seamOut, seamIn * seamIn) * 0.82;
+    if (seamDark > 0.01) {
+      ctx.fillStyle = `rgba(3, 5, 12, ${seamDark})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+  }
+
+  // =========================================================================
+  // MAIN ANIMATION LOOP (5.000s Exact Seamless Cycle)
+  // =========================================================================
+  let startTime = null;
+
+  function renderFrame(now) {
+    if (startTime === null) startTime = now;
+    const t = (((now - startTime) / 1000) % DURATION + DURATION) % DURATION;
+
+    // Choreographed intensity envelopes
+    const chargeP = t < 1.72 ? norm(t, 0.65, 1.72) : 1;
+    const heroActive = norm(t, 1.72, 2.05) * (1 - norm(t, 4.35, 4.80));
+    const exitWarp = easeInExpo(norm(t, 4.30, 5.0));
+    const entryWarp = 1 - easeOutExpo(norm(t, 0.0, 0.65));
+    const warpFactor = exitWarp + entryWarp * 0.55;
+
+    // Scheduled stylish micro-glitch pulses (impact, mid-hold accents, exit)
+    const pulseAt = (center, width) => {
+      const d = Math.abs(t - center);
+      return d < width ? Math.pow(1 - d / width, 2) : 0;
+    };
+    const glitchIntensity = clamp(
+      pulseAt(1.73, 0.22) * 1.0 +
+      pulseAt(2.86, 0.09) * 0.62 +
+      pulseAt(3.72, 0.08) * 0.52 +
+      norm(t, 4.38, 4.80) * 0.95,
+      0, 1
+    );
+
+    // Cinematic camera micro-shake on impact & heavy glitch
+    let shakeX = 0, shakeY = 0;
+    if (t >= 1.70 && t < 2.25) {
+      const decay = Math.pow(1 - (t - 1.70) / 0.55, 2.4);
+      shakeX = Math.sin(t * 140) * 18 * decay;
+      shakeY = Math.cos(t * 165) * 18 * decay;
+    } else if (glitchIntensity > 0.35) {
+      shakeX = Math.sin(t * 210) * 7 * glitchIntensity;
+      shakeY = Math.cos(t * 190) * 4 * glitchIntensity;
+    }
+
+    const heroCenterY = CY - 55;
+    const subCenterY = CY + 145;
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    // 1. Deep Atmospheric Background
+    drawBackground(t, Math.max(chargeP * 0.7, heroActive));
+
+    // 2. 3D Perspective Cyber Grid
+    drawCyberGrid(t, warpFactor);
+
+    // 3. Hyperspace Energy Particles / Stars
+    drawStarfield(t, warpFactor + pulseAt(1.74, 0.35) * 0.6);
+
+    // 4. Vibecoding Code Streams
+    const codeFade = lerp(1.0, 0.42, heroActive) * (1 - exitWarp * 0.7);
+    drawCodeStreams(t, codeFade);
+
+    // 5. High-Speed Horizontal Neon Streaks
+    drawSpeedStreaks(t, clamp(chargeP * 0.75 + exitWarp * 1.1 + pulseAt(1.75, 0.35), 0, 1));
+
+    // 6. 3D Projected Neural Network Constellation
+    const neuralScale = t < 1.72
+      ? lerp(0.82, 0.52, easeInExpo(chargeP))
+      : lerp(1.38, 1.18, easeOutExpo(norm(t, 1.72, 2.45))) * lerp(1, 1.9, exitWarp);
+    const neuralAlpha = t < 1.72
+      ? lerp(0.55, 1.0, norm(t, 0.0, 1.2))
+      : lerp(0.85, 0.52, norm(t, 1.72, 2.4)) * (1 - exitWarp * 0.8);
+    drawNeuralCore(t, neuralScale, neuralAlpha, heroCenterY);
+
+    // 7. Rotating AI Core HUD & Audio Spectrum Rings
+    drawHUDRings(t, heroCenterY, chargeP, heroActive);
+
+    // 8. Explosive Impact Shockwave, Lens Flare & Sparks
+    drawImpactFX(t, 1.72, heroCenterY);
+
+    // 9. Climax Hero Title: "СЯМЫЧ"
+    drawHeroTitle(t, heroCenterY, glitchIntensity);
+
+    // 10. Subtitle Badge: "AI Native"
+    drawSubtitle(t, subCenterY, glitchIntensity);
+
+    ctx.restore();
+
+    // 11. Broadcast Frame Telemetry HUD (unshaken)
+    drawFrameHUD(t, glitchIntensity);
+
+    // 12. Scanlines, Vignette & Seamless Loop Pulse
+    drawPostFX(t);
+
+    requestAnimationFrame(renderFrame);
+  }
+
+  requestAnimationFrame(renderFrame);
+})();
+</script>
+</body>
+</html>

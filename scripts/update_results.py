@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 from html import escape
 from pathlib import Path
+from xml.etree.ElementTree import ParseError, fromstring
 
 SITE = Path(__file__).resolve().parents[1]
 LIFE = SITE.parent
@@ -20,6 +21,7 @@ NAMES = {
     "apple-intelligence": "Apple Intelligence",
     "gpt-6-astra": "GPT-6 Astra", "gpt-6.1-terra": "GPT-6.1 Terra",
     "gemini-4-hydrogen": "Gemini 4 Hydrogen",
+    "gemini-4-neon": "Gemini 4 Neon", "gpt-6.2-astra": "GPT-6.2 Astra",
     "gemini-4-carbon": "Gemini 4 Carbon", "kimi-k3.1-pro": "Kimi K3.1 Pro",
     "claude-opus-5.5": "Claude Opus 5.5", "claude-sonnet-5.5": "Claude Sonnet 5.5",
     "claude-fable-5.2": "Claude Fable 5.2",
@@ -30,6 +32,10 @@ VENDORS = {"openai": ("OpenAI", "openai"), "google": ("Google", "googlegemini"),
            "moonshotai": ("Moonshot AI", "moonshotai"), "anthropic": ("Anthropic", "anthropic")}
 TASK_NAMES = {"пальцы": "Пальцы", "портрет": "Портрет", "заставка": "Заставка", "3d-сцена": "3D-город"}
 HTML_TASKS = {"заставка": "intro.html", "3d-сцена": "city.html"}
+PORTRAIT_MODELS = {
+    "qwen/qwen4-max-preview", "google/gemini-4-hydrogen", "apple/apple-intelligence",
+    "google/gemini-4-neon", "openai/gpt-6.2-astra",
+}
 # Правки только для просмотра. Хеш привязывает их к конкретному ответу модели.
 CITY_FIXES = {
     "1ebd4c7431229faed9985ec2ece3f72a836e1f7f8edbda0a709ecfdd366b2496": (
@@ -113,7 +119,7 @@ def export_works(model, by_task, source_root):
     folder = Path("works") / model
     works = {}
     targets = dict(HTML_TASKS)
-    if model in {"qwen/qwen4-max-preview", "google/gemini-4-hydrogen", "apple/apple-intelligence"}:
+    if model in PORTRAIT_MODELS:
         targets["портрет"] = "portrait.svg"
     for task, target in targets.items():
         # Терминальный бенчмарк открывает файл из последней записи задачи.
@@ -126,9 +132,14 @@ def export_works(model, by_task, source_root):
         source = (source_dir / filename).resolve()
         if source.parent != source_dir.resolve():
             raise ValueError(f"Файл работы вне папки задачи: {filename}")
+        original = source.read_bytes()
+        if task == "портрет":
+            try:
+                fromstring(original)
+            except ParseError:
+                continue
         (SITE / folder).mkdir(parents=True, exist_ok=True)
         dest = folder / target
-        original = source.read_bytes()
         (SITE / dest).write_bytes(original)
         work = {"url": dest.as_posix()}
         fix = CITY_FIXES.get(hashlib.sha256(original).hexdigest())
@@ -251,6 +262,9 @@ def render_model(model, rank):
         notes.append("Цена и время указаны по зачётным ответам. Отдельная платная попытка нарисовать портрет оборвалась и в сумму не входит.")
     if m["id"] == "apple/apple-intelligence":
         notes.append("Локальный запуск на Mac. Цена вызова API — $0. Модель каждый раз отвечала «5», на фото шесть пальцев. Для заданий с изображением счётчик Apple не вернул число входных токенов.")
+    if (m["id"] == "google/gemini-4-neon" and m["tasks"]["портрет"] is not None
+            and "портрет" not in m["works"]):
+        notes.append("В ответе Neon нет завершённого SVG-портрета.")
     if m.get("portrait_context_limit"):
         notes.append("При генерации портрета закончился контекст модели. Готового SVG нет.")
     if rates:
